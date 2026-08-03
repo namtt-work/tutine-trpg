@@ -28,3 +28,42 @@ func TestApplyEffectsClampsRelationshipDelta(t *testing.T) {
 		t.Fatalf("changes = %#v, want one clamped +3 change", changes)
 	}
 }
+
+func TestApplyEffectsRejectsBatchWithoutPartialMutation(t *testing.T) {
+	save := NewStarterSave(NewGameRequest{Name: "Nam", Traits: []string{"careful"}, CampaignID: "thanh-van-sect"})
+
+	_, err := ApplyEffects(&save, []Effect{
+		{Type: EffectGrantItem, TargetID: "player", ItemID: "moonlit_grass", Amount: 1},
+		{Type: EffectGrantItem, TargetID: "player", ItemID: "heaven_sword", Amount: 1},
+	})
+	if err == nil {
+		t.Fatal("expected invalid batch to be rejected")
+	}
+	if len(save.Inventory) != 0 {
+		t.Fatalf("inventory mutated after rejected batch: %#v", save.Inventory)
+	}
+}
+
+func TestApplyEffectsReportsActualEnergyDelta(t *testing.T) {
+	save := NewStarterSave(NewGameRequest{Name: "Nam", Traits: []string{"careful"}, CampaignID: "thanh-van-sect"})
+	save.Player.SpiritualEnergy = 19
+
+	changes, err := ApplyEffects(&save, []Effect{{Type: EffectEnergyDelta, TargetID: "player", Amount: 20}})
+	if err != nil {
+		t.Fatalf("ApplyEffects returned error: %v", err)
+	}
+	if got := save.Player.SpiritualEnergy; got != 20 {
+		t.Fatalf("energy = %d, want 20", got)
+	}
+	if len(changes) != 1 || changes[0].Amount != 1 {
+		t.Fatalf("changes = %#v, want one actual +1 change", changes)
+	}
+
+	changes, err = ApplyEffects(&save, []Effect{{Type: EffectEnergyDelta, TargetID: "player", Amount: 20}})
+	if err != nil {
+		t.Fatalf("ApplyEffects returned error at energy cap: %v", err)
+	}
+	if len(changes) != 1 || changes[0].Amount != 0 {
+		t.Fatalf("changes = %#v, want one zero change at energy cap", changes)
+	}
+}
