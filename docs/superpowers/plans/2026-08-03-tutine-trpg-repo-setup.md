@@ -50,7 +50,7 @@ Expected: Plan documents the repo setup task and its constraints.
 Create `README.md` describing `Tutine TRPG`, the architecture direction, MVP scope, planned layout, and development status.
 Expected: README gives a clear first view of the project without claiming unfinished code exists.
 
-- [ ] **Step 5: Initialize git and commit**
+- [x] **Step 5: Initialize git and commit**
 
 Run:
 
