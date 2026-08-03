@@ -17,7 +17,7 @@ import (
 
 func main() {
 	offline := flag.Bool("offline", true, "run with fake LLM client")
-	name := flag.String("name", "Vo Danh", "player name")
+	name := flag.String("name", "Vô Danh", "player name")
 	dataDir := flag.String("data-dir", "./data/dev", "data directory")
 	flag.Parse()
 	if !*offline {
@@ -33,7 +33,7 @@ func main() {
 	defer cleanup()
 
 	fmt.Println("Tutine TRPG")
-	fmt.Println("Nhap /exit de thoat, /status de xem nhan vat.")
+	fmt.Println("Nhập /exit để thoát, /status để xem nhân vật.")
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("> ")
@@ -49,12 +49,12 @@ func main() {
 		}
 		if text == "/status" {
 			save := session.Save()
-			fmt.Printf("%s - %s tang %d | HP %d/%d | Linh luc %d/%d\n", save.Player.Name, save.Player.Realm, save.Player.Stage, save.Player.HP, save.Player.MaxHP, save.Player.SpiritualEnergy, save.Player.MaxEnergy)
+			fmt.Printf("%s - %s tầng %d | HP %d/%d | Linh lực %d/%d\n", save.Player.Name, save.Player.Realm, save.Player.Stage, save.Player.HP, save.Player.MaxHP, save.Player.SpiritualEnergy, save.Player.MaxEnergy)
 			continue
 		}
 		result, err := session.HandleTurn(context.Background(), orchestrator.PlayerInput{Text: text})
 		if err != nil {
-			fmt.Println("Loi:", err)
+			fmt.Println("Lỗi:", err)
 			continue
 		}
 		fmt.Println(result.Narration)
@@ -65,11 +65,11 @@ func main() {
 			fmt.Printf("%d. %s\n", i+1, option)
 		}
 		for _, warning := range result.Warnings {
-			fmt.Println("Canh bao:", warning)
+			fmt.Println("Cảnh báo:", warning)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "Loi doc dau vao:", err)
+		fmt.Fprintln(os.Stderr, "Lỗi đọc đầu vào:", err)
 	}
 }
 

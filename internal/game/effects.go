@@ -40,14 +40,14 @@ func ApplyEffects(save *SaveGame, effects []Effect) ([]StateChangeView, error) {
 				return nil, err
 			}
 			working.Inventory[effect.ItemID] += effect.Amount
-			changes = append(changes, StateChangeView{Type: effect.Type, TargetID: effect.ItemID, Amount: effect.Amount, Message: "nhan vat pham"})
+			changes = append(changes, StateChangeView{Type: effect.Type, TargetID: effect.ItemID, Amount: effect.Amount, Message: "nhận vật phẩm"})
 		case EffectRelationshipDelta:
 			if err := validateRelationshipTarget(working, effect); err != nil {
 				return nil, err
 			}
 			amount := clamp(effect.Amount, -3, 3)
 			working.Player.Relationships[effect.TargetID] += amount
-			changes = append(changes, StateChangeView{Type: effect.Type, TargetID: effect.TargetID, Amount: amount, Message: "quan he thay doi"})
+			changes = append(changes, StateChangeView{Type: effect.Type, TargetID: effect.TargetID, Amount: amount, Message: "quan hệ thay đổi"})
 		case EffectEnergyDelta:
 			if err := validatePlayerTarget(effect); err != nil {
 				return nil, err
@@ -56,7 +56,7 @@ func ApplyEffects(save *SaveGame, effects []Effect) ([]StateChangeView, error) {
 			requested := clamp(effect.Amount, -working.Player.MaxEnergy, working.Player.MaxEnergy)
 			working.Player.SpiritualEnergy = clamp(oldEnergy+requested, 0, working.Player.MaxEnergy)
 			amount := working.Player.SpiritualEnergy - oldEnergy
-			changes = append(changes, StateChangeView{Type: effect.Type, TargetID: "player", Amount: amount, Message: "linh luc thay doi"})
+			changes = append(changes, StateChangeView{Type: effect.Type, TargetID: "player", Amount: amount, Message: "linh lực thay đổi"})
 		default:
 			return nil, fmt.Errorf("unknown effect type %q", effect.Type)
 		}

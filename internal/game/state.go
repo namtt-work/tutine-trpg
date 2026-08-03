@@ -73,7 +73,7 @@ type InputRequest struct {
 func NewStarterSave(req NewGameRequest) SaveGame {
 	name := req.Name
 	if name == "" {
-		name = "Vo Danh"
+		name = "Vô Danh"
 	}
 	campaignID := req.CampaignID
 	if campaignID == "" {

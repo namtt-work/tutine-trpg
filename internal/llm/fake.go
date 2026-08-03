@@ -13,7 +13,7 @@ func (FakeClient) PlanRetrieval(ctx context.Context, req PlannerRequest) (Retrie
 }
 
 func (FakeClient) Narrate(ctx context.Context, req NarratorRequest) (NarratorResponse, error) {
-	return NarratorResponse{Narration: "Gio nui thoi qua cong mon Thanh Van Tong khi ban can nhac hanh dong tiep theo.", ProposedEffects: []game.Effect{{Type: game.EffectEnergyDelta, TargetID: "player", Amount: 0}}, SuggestedNextOptions: []string{"Quan sat xung quanh", "Hoi de tu gac cong", "Kiem tra trang thai"}}, nil
+	return NarratorResponse{Narration: "Gió núi thổi qua cổng môn Thanh Vân Tông khi bạn cân nhắc hành động tiếp theo.", ProposedEffects: []game.Effect{{Type: game.EffectEnergyDelta, TargetID: "player", Amount: 0}}, SuggestedNextOptions: []string{"Quan sát xung quanh", "Hỏi đệ tử gác cổng", "Kiểm tra trạng thái"}}, nil
 }
 
 func (FakeClient) ExtractMemories(ctx context.Context, req ExtractorRequest) ([]MemoryDraft, error) {
