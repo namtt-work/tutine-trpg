@@ -50,7 +50,7 @@ campaigns/<campaign-id>
 
 ## Trạng Thái Hiện Tại
 
-Repo hiện đang chứa tài liệu thiết kế MVP đã chốt. Chưa bắt đầu implementation.
+Foundation CLI đã có thể chạy offline với fake LLM client. Các phần mở rộng như online provider sẽ được bổ sung ở các task tiếp theo.
 
 Design spec:
 
@@ -59,6 +59,14 @@ Design spec:
 Setup plan:
 
 - [`docs/superpowers/plans/2026-08-03-tutine-trpg-repo-setup.md`](docs/superpowers/plans/2026-08-03-tutine-trpg-repo-setup.md)
+
+## Chạy Thử Offline
+
+```bash
+go run ./cmd/tu-tien-cli --offline --name Nam
+```
+
+Offline mode dùng fake LLM client nên không cần API key. Online provider sẽ được nối ở các task sau.
 
 ## Tên Gọi
 
