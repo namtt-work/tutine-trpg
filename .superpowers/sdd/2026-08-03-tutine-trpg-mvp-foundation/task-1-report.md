@@ -29,3 +29,27 @@ Status: DONE
 ## Concerns
 
 - No concerns for the scope of Task 1. The starter allowlist is intentionally local and should move to campaign configuration in a later task.
+
+## Review Fix Report
+
+Status: DONE
+
+### Findings Addressed
+
+- `ApplyEffects` now applies effects to a deep copy and commits only after the complete batch succeeds, preventing partial mutation after a rejected effect.
+- Energy state changes now report `newEnergy - oldEnergy`, including zero at the cap and the actual bounded delta near the cap.
+- Added regression tests for rejected multi-effect batches and energy-boundary reporting.
+
+### Tests Run
+
+- `go test ./internal/game`: PASS
+- `go test ./...`: PASS
+- `git diff --check`: PASS
+
+### Commit
+
+- `1ac4191` `fix: make effect application atomic`
+
+### Concerns
+
+- None for the reviewed findings.
