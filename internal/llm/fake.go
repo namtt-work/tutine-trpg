@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/namtt/tutine-trpg/internal/game"
 )
@@ -13,7 +15,11 @@ func (FakeClient) PlanRetrieval(ctx context.Context, req PlannerRequest) (Retrie
 }
 
 func (FakeClient) Narrate(ctx context.Context, req NarratorRequest) (NarratorResponse, error) {
-	return NarratorResponse{Narration: "Gió núi thổi qua cổng môn Thanh Vân Tông khi bạn cân nhắc hành động tiếp theo.", ProposedEffects: []game.Effect{{Type: game.EffectEnergyDelta, TargetID: "player", Amount: 0}}, SuggestedNextOptions: []string{"Quan sát xung quanh", "Hỏi đệ tử gác cổng", "Kiểm tra trạng thái"}}, nil
+	action := strings.TrimSpace(req.PlayerAction)
+	if action == "" {
+		action = "quan sát xung quanh"
+	}
+	return NarratorResponse{Narration: fmt.Sprintf("Bạn chọn: %s. Gió núi thổi qua cổng môn Thanh Vân Tông khi bạn cân nhắc hành động tiếp theo.", action), ProposedEffects: []game.Effect{{Type: game.EffectEnergyDelta, TargetID: "player", Amount: 0}}, SuggestedNextOptions: []string{"Quan sát xung quanh", "Hỏi đệ tử gác cổng", "Kiểm tra trạng thái"}}, nil
 }
 
 func (FakeClient) ExtractMemories(ctx context.Context, req ExtractorRequest) ([]MemoryDraft, error) {
