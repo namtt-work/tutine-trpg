@@ -27,7 +27,6 @@
 - `cmd/tu-tien-cli/main.go`: CLI entrypoint and command loop.
 - `internal/game/state.go`: Save, player, stats, quest, inventory, and turn result view types.
 - `internal/game/effects.go`: Effect types, validation, and state mutation rules.
-- `internal/game/combat.go`: Medium-depth combat exchange resolution.
 - `internal/config/config.go`: Runtime config structs and YAML loader.
 - `internal/campaign/campaign.go`: Campaign data structs and loader.
 - `internal/memory/memory.go`: Memory models and search query types.
