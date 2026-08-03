@@ -25,7 +25,10 @@ type Session struct {
 	client      llm.Client
 	memories    memory.Store
 	allowedTags []string
+	recentTurns []llm.RecentTurn
 }
+
+const maxRecentNarratorTurns = 12
 
 func NewSession(save game.SaveGame, client llm.Client, memories memory.Store, allowedTags []string) *Session {
 	return &Session{save: save, client: client, memories: memories, allowedTags: append([]string{}, allowedTags...)}
@@ -55,18 +58,15 @@ func (s *Session) HandleTurn(ctx context.Context, input PlayerInput) (*game.Turn
 		contextLines = append(contextLines, hit.Memory.Summary)
 	}
 
-	narration, err := s.client.Narrate(ctx, llm.NarratorRequest{PlayerAction: input.Text, SceneID: s.save.CurrentScene, StateSummary: fmt.Sprintf("%s %s stage %d", s.save.Player.Name, s.save.Player.Realm, s.save.Player.Stage), RetrievedContext: contextLines, AllowedEffects: []string{game.EffectEnergyDelta, game.EffectRelationshipDelta, game.EffectGrantItem}})
+	narration, err := s.client.Narrate(ctx, llm.NarratorRequest{PlayerAction: input.Text, SceneID: s.save.CurrentScene, AuthoritativeState: narratorState(s.save), RecentTurns: copyRecentTurns(s.recentTurns), RetrievedContext: contextLines, AllowedEffects: []string{game.EffectEnergyDelta, game.EffectRelationshipDelta, game.EffectGrantItem}})
 	if err != nil {
 		return nil, err
 	}
 
-	changes, err := game.ApplyEffects(&s.save, narration.ProposedEffects)
-	if err != nil {
-		return nil, err
-	}
+	changes, warnings := s.applyProposedEffects(narration.ProposedEffects)
 	s.save.CurrentTurn++
+	s.rememberTurn(llm.RecentTurn{PlayerAction: input.Text, Narration: narration.Narration, ResolvedChanges: changes})
 
-	warnings := []string{}
 	drafts, err := s.client.ExtractMemories(ctx, llm.ExtractorRequest{PlayerAction: input.Text, Narration: narration.Narration, ResolvedChanges: changes, AllowedTags: s.allowedTags})
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("memory extraction failed: %v", err))
@@ -80,6 +80,98 @@ func (s *Session) HandleTurn(ctx context.Context, input PlayerInput) (*game.Turn
 	}
 
 	return &game.TurnResult{Narration: narration.Narration, StateChanges: changes, SuggestedActions: narration.SuggestedNextOptions, Warnings: warnings}, nil
+}
+
+func (s *Session) rememberTurn(turn llm.RecentTurn) {
+	if strings.TrimSpace(turn.Narration) == "" {
+		return
+	}
+	s.recentTurns = append(s.recentTurns, turn)
+	if len(s.recentTurns) > maxRecentNarratorTurns {
+		s.recentTurns = s.recentTurns[len(s.recentTurns)-maxRecentNarratorTurns:]
+	}
+}
+
+func narratorState(save game.SaveGame) llm.NarratorState {
+	snapshot := save.Clone()
+	return llm.NarratorState{
+		CurrentTurn:  snapshot.CurrentTurn,
+		CurrentScene: snapshot.CurrentScene,
+		Player: llm.NarratorPlayerState{
+			Identity:        playerIdentity(snapshot),
+			Name:            snapshot.Player.Name,
+			Traits:          append([]string(nil), snapshot.Player.Traits...),
+			Realm:           displayRealm(snapshot.Player.Realm),
+			Stage:           snapshot.Player.Stage,
+			HP:              snapshot.Player.HP,
+			MaxHP:           snapshot.Player.MaxHP,
+			SpiritualEnergy: snapshot.Player.SpiritualEnergy,
+			MaxEnergy:       snapshot.Player.MaxEnergy,
+			Attack:          snapshot.Player.Stats.Attack,
+			Defense:         snapshot.Player.Stats.Defense,
+			Speed:           snapshot.Player.Stats.Speed,
+			Comprehension:   snapshot.Player.Stats.Comprehension,
+			Luck:            snapshot.Player.Stats.Luck,
+			Techniques:      displayTechniques(snapshot.Player.Techniques),
+			Artifacts:       snapshot.Player.Artifacts,
+			Relationships:   snapshot.Player.Relationships,
+		},
+		Inventory:  snapshot.Inventory,
+		WorldFlags: snapshot.WorldFlags,
+		Cooldowns:  snapshot.Cooldowns,
+	}
+}
+
+func playerIdentity(save game.SaveGame) string {
+	if save.CurrentScene == "loc_outer_gate" {
+		return "Người mới cầu nhập môn tại Thanh Vân Tông"
+	}
+	return "Thân phận chưa có thay đổi nào được engine xác nhận"
+}
+
+func displayRealm(realm string) string {
+	switch realm {
+	case "qi_refining":
+		return "Luyện Khí"
+	default:
+		return realm
+	}
+}
+
+func displayTechniques(techniques []string) []string {
+	display := make([]string, 0, len(techniques))
+	for _, technique := range techniques {
+		switch technique {
+		case "basic_strike":
+			display = append(display, "Đòn cơ bản")
+		default:
+			display = append(display, technique)
+		}
+	}
+	return display
+}
+
+func copyRecentTurns(turns []llm.RecentTurn) []llm.RecentTurn {
+	copyTurns := make([]llm.RecentTurn, len(turns))
+	for i, turn := range turns {
+		copyTurns[i] = turn
+		copyTurns[i].ResolvedChanges = append([]game.StateChangeView(nil), turn.ResolvedChanges...)
+	}
+	return copyTurns
+}
+
+func (s *Session) applyProposedEffects(effects []game.Effect) ([]game.StateChangeView, []string) {
+	changes := []game.StateChangeView{}
+	warnings := []string{}
+	for _, effect := range effects {
+		effectChanges, err := game.ApplyEffects(&s.save, []game.Effect{effect})
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("rejected llm effect %q: %v", effect.Type, err))
+			continue
+		}
+		changes = append(changes, effectChanges...)
+	}
+	return changes, warnings
 }
 
 func filterTags(tags []string, allowed []string) []string {

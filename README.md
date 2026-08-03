@@ -50,7 +50,7 @@ campaigns/<campaign-id>
 
 ## Trạng Thái Hiện Tại
 
-Foundation CLI đã có thể chạy offline với fake LLM client. Các phần mở rộng như online provider sẽ được bổ sung ở các task tiếp theo.
+CLI/TUI hiện chạy với provider LLM thật qua API tương thích OpenAI. Cấu hình mặc định nằm ở `configs/llm.yaml` và dùng Groq qua biến môi trường `GROQ_API_KEY`.
 
 Design spec:
 
@@ -60,13 +60,18 @@ Setup plan:
 
 - [`docs/superpowers/plans/2026-08-03-tutine-trpg-repo-setup.md`](docs/superpowers/plans/2026-08-03-tutine-trpg-repo-setup.md)
 
-## Chạy Thử Offline
+## Chạy TUI Với LLM
 
 ```bash
-go run ./cmd/tu-tien-cli --offline --name Nam
+export GROQ_API_KEY=your_key_here
+go run ./cmd/tu-tien-cli --name Nam
 ```
 
-Offline mode dùng fake LLM client nên không cần API key. Online provider sẽ được nối ở các task sau.
+Mặc định CLI đọc `configs/llm.yaml`. Có thể dùng `--config <path>` nếu muốn chạy provider/model khác.
+
+Hướng dẫn chơi qua CLI:
+
+- [`docs/cli-guide.md`](docs/cli-guide.md)
 
 ## Tên Gọi
 

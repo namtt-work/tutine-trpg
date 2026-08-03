@@ -1,0 +1,14 @@
+llm:
+  base_url: https://api.groq.com/openai/v1
+  api_key_env: GROQ_API_KEY
+  model: llama-3.3-70b-versatile
+  # base_url: http://localhost:2455/v1
+  # api_key_env: CODEX_LB_API_KEY
+  # model: gpt-5.6-luna
+  timeout_seconds: 45
+  max_retries: 2
+storage:
+  data_dir: ./data/dev
+debug:
+  log_llm_requests: false
+  log_retrieval: true

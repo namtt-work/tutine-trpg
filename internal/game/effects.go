@@ -17,11 +17,11 @@ var starterAllowedItems = map[string]bool{
 }
 
 type Effect struct {
-	Type     string `json:"type"`
-	TargetID string `json:"target_id"`
-	ItemID   string `json:"item_id,omitempty"`
-	Amount   int    `json:"amount"`
-	Reason   string `json:"reason,omitempty"`
+	Type     string `json:"type" yaml:"type"`
+	TargetID string `json:"target_id" yaml:"target_id"`
+	ItemID   string `json:"item_id,omitempty" yaml:"item_id,omitempty"`
+	Amount   int    `json:"amount" yaml:"amount"`
+	Reason   string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 func ApplyEffects(save *SaveGame, effects []Effect) ([]StateChangeView, error) {
