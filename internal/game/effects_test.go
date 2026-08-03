@@ -67,3 +67,51 @@ func TestApplyEffectsReportsActualEnergyDelta(t *testing.T) {
 		t.Fatalf("changes = %#v, want one zero change at energy cap", changes)
 	}
 }
+
+func TestApplyEffectsRejectsEmptyTargetForPlayerOnlyEffects(t *testing.T) {
+	tests := []Effect{
+		{Type: EffectGrantItem, ItemID: "moonlit_grass", Amount: 1},
+		{Type: EffectEnergyDelta, Amount: 1},
+	}
+	for _, effect := range tests {
+		t.Run(effect.Type, func(t *testing.T) {
+			save := NewStarterSave(NewGameRequest{Name: "Nam"})
+
+			_, err := ApplyEffects(&save, []Effect{effect})
+			if err == nil {
+				t.Fatalf("ApplyEffects accepted empty target: %#v", effect)
+			}
+		})
+	}
+}
+
+func TestApplyEffectsRejectsNonPlayerTargetForPlayerOnlyEffects(t *testing.T) {
+	tests := []Effect{
+		{Type: EffectGrantItem, TargetID: "npc_luc_thanh_nghi", ItemID: "moonlit_grass", Amount: 1},
+		{Type: EffectEnergyDelta, TargetID: "npc_luc_thanh_nghi", Amount: 1},
+	}
+	for _, effect := range tests {
+		t.Run(effect.Type, func(t *testing.T) {
+			save := NewStarterSave(NewGameRequest{Name: "Nam"})
+
+			_, err := ApplyEffects(&save, []Effect{effect})
+			if err == nil {
+				t.Fatalf("ApplyEffects accepted non-player target: %#v", effect)
+			}
+		})
+	}
+}
+
+func TestApplyEffectsRejectsUnknownRelationshipTarget(t *testing.T) {
+	tests := []string{"", "npc_unknown"}
+	for _, targetID := range tests {
+		t.Run(targetID, func(t *testing.T) {
+			save := NewStarterSave(NewGameRequest{Name: "Nam"})
+
+			_, err := ApplyEffects(&save, []Effect{{Type: EffectRelationshipDelta, TargetID: targetID, Amount: 1}})
+			if err == nil {
+				t.Fatalf("ApplyEffects accepted unknown relationship target %q", targetID)
+			}
+		})
+	}
+}

@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/namtt/tutine-trpg/internal/game"
 	"github.com/namtt/tutine-trpg/internal/llm"
@@ -30,16 +32,21 @@ func NewSession(save game.SaveGame, client llm.Client, memories memory.Store, al
 }
 
 func (s *Session) Save() game.SaveGame {
-	return cloneSave(s.save)
+	return s.save.Clone()
 }
 
 func (s *Session) HandleTurn(ctx context.Context, input PlayerInput) (*game.TurnResult, error) {
+	input.Text = strings.TrimSpace(input.Text)
+	if input.Text == "" {
+		return nil, errors.New("player input is required")
+	}
+
 	plan, err := s.client.PlanRetrieval(ctx, llm.PlannerRequest{PlayerAction: input.Text, SceneID: s.save.CurrentScene, AllowedTags: s.allowedTags, NearbyIDs: []string{"player"}})
 	if err != nil {
 		return nil, err
 	}
 
-	hits, err := s.memories.Search(ctx, memory.Query{SaveID: s.save.SaveID, Entities: plan.Entities, Tags: plan.Tags, Keywords: plan.Keywords, MaxResults: plan.MaxResults})
+	hits, err := s.memories.Search(ctx, memory.Query{SaveID: s.save.SaveID, Entities: plan.Entities, Tags: plan.Tags, Types: plan.MemoryTypes, Locations: plan.Locations, QuestIDs: plan.QuestIDs, Keywords: plan.Keywords, MaxResults: plan.MaxResults})
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +72,8 @@ func (s *Session) HandleTurn(ctx context.Context, input PlayerInput) (*game.Turn
 		warnings = append(warnings, fmt.Sprintf("memory extraction failed: %v", err))
 	} else {
 		for i, draft := range drafts {
-			if err := s.memories.Add(ctx, memory.Memory{ID: fmt.Sprintf("turn_%d_%d", s.save.CurrentTurn, i), SaveID: s.save.SaveID, CampaignID: s.save.CampaignID, Turn: s.save.CurrentTurn, Type: draft.Type, Importance: draft.Importance, Text: draft.Text, Summary: draft.Text, Entities: draft.Entities, Tags: filterTags(draft.Tags, s.allowedTags), FactsJSON: draft.FactsJSON}); err != nil {
+			memoryID := fmt.Sprintf("%s_turn_%d_%d", s.save.SaveID, s.save.CurrentTurn, i)
+			if err := s.memories.Add(ctx, memory.Memory{ID: memoryID, SaveID: s.save.SaveID, CampaignID: s.save.CampaignID, Turn: s.save.CurrentTurn, Type: draft.Type, Importance: draft.Importance, Text: draft.Text, Summary: draft.Text, Entities: draft.Entities, Tags: filterTags(draft.Tags, s.allowedTags), FactsJSON: draft.FactsJSON}); err != nil {
 				warnings = append(warnings, fmt.Sprintf("memory persistence failed: %v", err))
 			}
 		}
@@ -86,37 +94,4 @@ func filterTags(tags []string, allowed []string) []string {
 		}
 	}
 	return out
-}
-
-func cloneSave(save game.SaveGame) game.SaveGame {
-	save.Inventory = cloneIntMap(save.Inventory)
-	save.WorldFlags = cloneBoolMap(save.WorldFlags)
-	save.Cooldowns = cloneIntMap(save.Cooldowns)
-	save.Player.Traits = append([]string(nil), save.Player.Traits...)
-	save.Player.Techniques = append([]string(nil), save.Player.Techniques...)
-	save.Player.Artifacts = append([]string(nil), save.Player.Artifacts...)
-	save.Player.Relationships = cloneIntMap(save.Player.Relationships)
-	return save
-}
-
-func cloneIntMap(values map[string]int) map[string]int {
-	if values == nil {
-		return nil
-	}
-	clone := make(map[string]int, len(values))
-	for key, value := range values {
-		clone[key] = value
-	}
-	return clone
-}
-
-func cloneBoolMap(values map[string]bool) map[string]bool {
-	if values == nil {
-		return nil
-	}
-	clone := make(map[string]bool, len(values))
-	for key, value := range values {
-		clone[key] = value
-	}
-	return clone
 }

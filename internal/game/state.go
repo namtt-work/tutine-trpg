@@ -1,6 +1,12 @@
 package game
 
-import "time"
+import (
+	"fmt"
+	"sync/atomic"
+	"time"
+)
+
+var saveSequence uint64
 
 type NewGameRequest struct {
 	Name       string
@@ -74,7 +80,7 @@ func NewStarterSave(req NewGameRequest) SaveGame {
 		campaignID = "thanh-van-sect"
 	}
 	return SaveGame{
-		SaveID:       "local-dev",
+		SaveID:       newSaveID(),
 		CampaignID:   campaignID,
 		CurrentTurn:  0,
 		CurrentScene: "loc_outer_gate",
@@ -95,7 +101,44 @@ func NewStarterSave(req NewGameRequest) SaveGame {
 			Stats:           Stats{Attack: 6, Defense: 4, Speed: 5, Comprehension: 5, Luck: 5},
 			Techniques:      []string{"basic_strike"},
 			Artifacts:       []string{},
-			Relationships:   map[string]int{},
+			Relationships:   map[string]int{"npc_luc_thanh_nghi": 0},
 		},
 	}
+}
+
+func (save SaveGame) Clone() SaveGame {
+	save.Inventory = cloneIntMap(save.Inventory)
+	save.WorldFlags = cloneBoolMap(save.WorldFlags)
+	save.Cooldowns = cloneIntMap(save.Cooldowns)
+	save.Player.Traits = append([]string(nil), save.Player.Traits...)
+	save.Player.Techniques = append([]string(nil), save.Player.Techniques...)
+	save.Player.Artifacts = append([]string(nil), save.Player.Artifacts...)
+	save.Player.Relationships = cloneIntMap(save.Player.Relationships)
+	return save
+}
+
+func newSaveID() string {
+	return fmt.Sprintf("save_%d_%d", time.Now().UTC().UnixNano(), atomic.AddUint64(&saveSequence, 1))
+}
+
+func cloneIntMap(values map[string]int) map[string]int {
+	if values == nil {
+		return nil
+	}
+	clone := make(map[string]int, len(values))
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
+}
+
+func cloneBoolMap(values map[string]bool) map[string]bool {
+	if values == nil {
+		return nil
+	}
+	clone := make(map[string]bool, len(values))
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
 }

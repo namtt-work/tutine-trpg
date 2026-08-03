@@ -28,21 +28,30 @@ func ApplyEffects(save *SaveGame, effects []Effect) ([]StateChangeView, error) {
 	if save == nil {
 		return nil, errors.New("save is nil")
 	}
-	working := cloneSave(*save)
+	working := save.Clone()
 	changes := make([]StateChangeView, 0, len(effects))
 	for _, effect := range effects {
 		switch effect.Type {
 		case EffectGrantItem:
+			if err := validatePlayerTarget(effect); err != nil {
+				return nil, err
+			}
 			if err := validateItemEffect(effect); err != nil {
 				return nil, err
 			}
 			working.Inventory[effect.ItemID] += effect.Amount
 			changes = append(changes, StateChangeView{Type: effect.Type, TargetID: effect.ItemID, Amount: effect.Amount, Message: "nhan vat pham"})
 		case EffectRelationshipDelta:
+			if err := validateRelationshipTarget(working, effect); err != nil {
+				return nil, err
+			}
 			amount := clamp(effect.Amount, -3, 3)
 			working.Player.Relationships[effect.TargetID] += amount
 			changes = append(changes, StateChangeView{Type: effect.Type, TargetID: effect.TargetID, Amount: amount, Message: "quan he thay doi"})
 		case EffectEnergyDelta:
+			if err := validatePlayerTarget(effect); err != nil {
+				return nil, err
+			}
 			oldEnergy := working.Player.SpiritualEnergy
 			requested := clamp(effect.Amount, -working.Player.MaxEnergy, working.Player.MaxEnergy)
 			working.Player.SpiritualEnergy = clamp(oldEnergy+requested, 0, working.Player.MaxEnergy)
@@ -56,6 +65,23 @@ func ApplyEffects(save *SaveGame, effects []Effect) ([]StateChangeView, error) {
 	return changes, nil
 }
 
+func validatePlayerTarget(effect Effect) error {
+	if effect.TargetID != "player" {
+		return fmt.Errorf("effect %q requires target player", effect.Type)
+	}
+	return nil
+}
+
+func validateRelationshipTarget(save SaveGame, effect Effect) error {
+	if effect.TargetID == "" {
+		return errors.New("relationship target is required")
+	}
+	if _, known := save.Player.Relationships[effect.TargetID]; !known {
+		return fmt.Errorf("unknown relationship target %q", effect.TargetID)
+	}
+	return nil
+}
+
 func validateItemEffect(effect Effect) error {
 	if !starterAllowedItems[effect.ItemID] {
 		return fmt.Errorf("unknown or disallowed item %q", effect.ItemID)
@@ -64,33 +90,6 @@ func validateItemEffect(effect Effect) error {
 		return fmt.Errorf("invalid item amount %d", effect.Amount)
 	}
 	return nil
-}
-
-func cloneSave(save SaveGame) SaveGame {
-	save.Inventory = cloneIntMap(save.Inventory)
-	save.WorldFlags = cloneBoolMap(save.WorldFlags)
-	save.Cooldowns = cloneIntMap(save.Cooldowns)
-	save.Player.Traits = append([]string(nil), save.Player.Traits...)
-	save.Player.Techniques = append([]string(nil), save.Player.Techniques...)
-	save.Player.Artifacts = append([]string(nil), save.Player.Artifacts...)
-	save.Player.Relationships = cloneIntMap(save.Player.Relationships)
-	return save
-}
-
-func cloneIntMap(values map[string]int) map[string]int {
-	clone := make(map[string]int, len(values))
-	for key, value := range values {
-		clone[key] = value
-	}
-	return clone
-}
-
-func cloneBoolMap(values map[string]bool) map[string]bool {
-	clone := make(map[string]bool, len(values))
-	for key, value := range values {
-		clone[key] = value
-	}
-	return clone
 }
 
 func clamp(v, min, max int) int {

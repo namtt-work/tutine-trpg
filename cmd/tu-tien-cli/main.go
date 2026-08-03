@@ -64,18 +64,25 @@ func main() {
 		for i, option := range result.SuggestedActions {
 			fmt.Printf("%d. %s\n", i+1, option)
 		}
+		for _, warning := range result.Warnings {
+			fmt.Println("Canh bao:", warning)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, "Loi doc dau vao:", err)
 	}
 }
 
 func buildOfflineSession(dataDir string, name string) (*orchestrator.Session, func(), error) {
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	save := game.NewStarterSave(game.NewGameRequest{Name: name, CampaignID: "thanh-van-sect", Traits: []string{"careful"}})
+	saveDir := filepath.Join(dataDir, "saves", save.SaveID)
+	if err := os.MkdirAll(saveDir, 0o755); err != nil {
 		return nil, nil, err
 	}
-	store, err := memory.NewSQLiteStore(context.Background(), filepath.Join(dataDir, "game.db"))
+	store, err := memory.NewSQLiteStore(context.Background(), filepath.Join(saveDir, "game.db"))
 	if err != nil {
 		return nil, nil, err
 	}
-	save := game.NewStarterSave(game.NewGameRequest{Name: name, CampaignID: "thanh-van-sect", Traits: []string{"careful"}})
 	session := orchestrator.NewSession(save, llm.FakeClient{}, store, []string{"trust", "secret", "sect_politics"})
 	return session, func() { _ = store.Close() }, nil
 }
