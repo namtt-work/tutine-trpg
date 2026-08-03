@@ -63,6 +63,10 @@ func runInteractive(ctx context.Context, session orchestrator.GameSession, input
 			continue
 		}
 		if option, ok := resolveSuggestedAction(text, lastOptions); ok {
+			if command, isCommand := commandForSuggestedAction(option); isCommand {
+				handleCommand(output, session, command)
+				continue
+			}
 			text = option
 		}
 
@@ -127,6 +131,17 @@ func renderTurnResult(output io.Writer, result *game.TurnResult) {
 	}
 	for _, warning := range result.Warnings {
 		fmt.Fprintln(output, "Cảnh báo:", warning)
+	}
+}
+
+func commandForSuggestedAction(action string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "kiểm tra trạng thái", "xem trạng thái", "status":
+		return "/status", true
+	case "xem túi đồ", "kiểm tra túi đồ", "inventory":
+		return "/inventory", true
+	default:
+		return "", false
 	}
 }
 

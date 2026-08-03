@@ -112,17 +112,12 @@ func TestRunInteractiveWritesStateChangesToOutput(t *testing.T) {
 	}
 }
 
-func TestRunInteractiveMapsNumberToSuggestedAction(t *testing.T) {
+func TestRunInteractiveRoutesStatusSuggestionWithoutCallingLLM(t *testing.T) {
 	session := &recordingSession{
-		results: []*game.TurnResult{
-			{
-				Narration:        "Bạn đứng trước cổng môn.",
-				SuggestedActions: []string{"Quan sát xung quanh", "Hỏi đệ tử gác cổng", "Kiểm tra trạng thái"},
-			},
-			{
-				Narration: "Bạn kiểm tra trạng thái.",
-			},
-		},
+		results: []*game.TurnResult{{
+			Narration:        "Bạn đứng trước cổng môn.",
+			SuggestedActions: []string{"Quan sát xung quanh", "Hỏi đệ tử gác cổng", "Kiểm tra trạng thái"},
+		}},
 		save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"}),
 	}
 
@@ -131,7 +126,32 @@ func TestRunInteractiveMapsNumberToSuggestedAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runInteractive returned error: %v", err)
 	}
-	if got, want := session.inputs, []string{"ta quan sát cổng môn", "Kiểm tra trạng thái"}; !equalStrings(got, want) {
+	if got, want := session.inputs, []string{"ta quan sát cổng môn"}; !equalStrings(got, want) {
+		t.Fatalf("inputs = %#v, want %#v", got, want)
+	}
+	if !strings.Contains(out.String(), "Nam - qi_refining tầng 1") {
+		t.Fatalf("status suggestion did not render status:\n%s", out.String())
+	}
+}
+
+func TestRunInteractiveMapsNumberToRoleplaySuggestion(t *testing.T) {
+	session := &recordingSession{
+		results: []*game.TurnResult{
+			{
+				Narration:        "Bạn đứng trước cổng môn.",
+				SuggestedActions: []string{"Quan sát xung quanh", "Hỏi đệ tử gác cổng", "Kiểm tra trạng thái"},
+			},
+			{Narration: "Bạn quan sát xung quanh."},
+		},
+		save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"}),
+	}
+
+	var out bytes.Buffer
+	err := runInteractive(context.Background(), session, strings.NewReader("ta quan sát cổng môn\n1\n/exit\n"), &out)
+	if err != nil {
+		t.Fatalf("runInteractive returned error: %v", err)
+	}
+	if got, want := session.inputs, []string{"ta quan sát cổng môn", "Quan sát xung quanh"}; !equalStrings(got, want) {
 		t.Fatalf("inputs = %#v, want %#v", got, want)
 	}
 }
