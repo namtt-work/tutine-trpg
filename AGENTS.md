@@ -55,7 +55,6 @@ This is the root working guide for coding agents in `tutine-trpg`. Keep this fil
 
 ## Git And Commits
 
-- Do not commit unless the user explicitly asks.
 - Before committing, inspect `git status` and `git diff`, then stage only intended files.
 - Keep commit messages concise and project-scoped.
 - Do not add AI-generated footers or co-author lines unless explicitly requested.
