@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"testing"
 
@@ -75,6 +77,8 @@ func TestTUIStatusCommandDoesNotSubmitTurn(t *testing.T) {
 func TestTUITurnErrorIsRendered(t *testing.T) {
 	session := &failingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"}), err: errors.New("provider unavailable")}
 	model := newTUIModel(session, "test-model")
+	var logBuf bytes.Buffer
+	model.logger = log.New(&logBuf, "", 0)
 
 	model, cmd := model.handleText(context.Background(), "ta quan sát")
 	if cmd == nil {
@@ -82,8 +86,14 @@ func TestTUITurnErrorIsRendered(t *testing.T) {
 	}
 	model, _ = model.applyTurnMsg(cmd().(turnFinishedMsg))
 
-	if !strings.Contains(model.View(), "provider unavailable") {
-		t.Fatalf("view missing error:\n%s", model.View())
+	if strings.Contains(model.View(), "provider unavailable") {
+		t.Fatalf("view leaks raw internal error:\n%s", model.View())
+	}
+	if !strings.Contains(model.View(), "Người kể chuyện gặp trục trặc") {
+		t.Fatalf("view missing friendly error message:\n%s", model.View())
+	}
+	if !strings.Contains(logBuf.String(), "provider unavailable") {
+		t.Fatalf("logger missing raw error detail: %q", logBuf.String())
 	}
 }
 

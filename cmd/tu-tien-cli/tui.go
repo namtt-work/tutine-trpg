@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,10 +13,17 @@ import (
 	"github.com/namtt/tutine-trpg/internal/orchestrator"
 )
 
+// turnFailureMessage is shown to the player instead of the raw error text.
+// The underlying error (provider outage, malformed LLM output, etc.) is an
+// implementation detail the player can't act on; it's logged separately via
+// tuiModel.logger for debugging instead.
+const turnFailureMessage = "Người kể chuyện gặp trục trặc và chưa thể phản hồi hợp lệ. Hành động của bạn chưa được ghi nhận, hãy thử lại."
+
 type tuiModel struct {
 	ctx           context.Context
 	session       orchestrator.GameSession
 	providerLabel string
+	logger        *log.Logger
 	log           []string
 	suggestions   []string
 	input         string
@@ -48,9 +56,10 @@ func newTUIModel(session orchestrator.GameSession, providerLabel string) tuiMode
 	}
 }
 
-func runTUI(ctx context.Context, session orchestrator.GameSession, providerLabel string) error {
+func runTUI(ctx context.Context, session orchestrator.GameSession, providerLabel string, logger *log.Logger) error {
 	model := newTUIModel(session, providerLabel)
 	model.ctx = ctx
+	model.logger = logger
 	_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
 	return err
 }
@@ -136,7 +145,10 @@ func (m tuiModel) handleCommand(command string) (tuiModel, tea.Cmd) {
 func (m tuiModel) applyTurnMsg(msg turnFinishedMsg) (tuiModel, tea.Cmd) {
 	m.loading = false
 	if msg.err != nil {
-		m.log = append(m.log, errorStyle.Render("Lỗi: "+msg.err.Error()))
+		if m.logger != nil {
+			m.logger.Printf("turn failed (input=%q): %v", msg.input, msg.err)
+		}
+		m.log = append(m.log, errorStyle.Render("Lỗi: "+turnFailureMessage))
 		return m, nil
 	}
 	if msg.result == nil {

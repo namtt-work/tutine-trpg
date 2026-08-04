@@ -15,7 +15,7 @@ func TestBuildSessionRejectsMissingAPIKey(t *testing.T) {
 	t.Setenv("TEST_GROQ_API_KEY", "")
 	cfgPath := writeTestConfig(t, t.TempDir(), "TEST_GROQ_API_KEY")
 
-	_, cleanup, err := buildSession(context.Background(), cfgPath, "Nam")
+	_, _, cleanup, err := buildSession(context.Background(), cfgPath, "Nam")
 	if cleanup != nil {
 		cleanup()
 	}
@@ -28,11 +28,14 @@ func TestBuildSessionUsesConfigAndPlayerName(t *testing.T) {
 	t.Setenv("TEST_GROQ_API_KEY", "secret-test-key")
 	cfgPath := writeTestConfig(t, t.TempDir(), "TEST_GROQ_API_KEY")
 
-	session, cleanup, err := buildSession(context.Background(), cfgPath, "Nam")
+	session, logger, cleanup, err := buildSession(context.Background(), cfgPath, "Nam")
 	if err != nil {
 		t.Fatalf("buildSession returned error: %v", err)
 	}
 	defer cleanup()
+	if logger == nil {
+		t.Fatal("logger is nil, want non-nil debug logger")
+	}
 	if session.Save().Player.Name != "Nam" {
 		t.Fatalf("player name = %q, want Nam", session.Save().Player.Name)
 	}
@@ -42,13 +45,13 @@ func TestBuildSessionUsesDistinctSaveStorage(t *testing.T) {
 	t.Setenv("TEST_GROQ_API_KEY", "secret-test-key")
 	dataDir := t.TempDir()
 	cfgPath := writeTestConfig(t, dataDir, "TEST_GROQ_API_KEY")
-	first, firstCleanup, err := buildSession(context.Background(), cfgPath, "Nam")
+	first, _, firstCleanup, err := buildSession(context.Background(), cfgPath, "Nam")
 	if err != nil {
 		t.Fatalf("build first session: %v", err)
 	}
 	firstCleanup()
 
-	second, secondCleanup, err := buildSession(context.Background(), cfgPath, "Nam")
+	second, _, secondCleanup, err := buildSession(context.Background(), cfgPath, "Nam")
 	if err != nil {
 		t.Fatalf("build second session: %v", err)
 	}
