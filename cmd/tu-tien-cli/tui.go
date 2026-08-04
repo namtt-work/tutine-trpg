@@ -8,6 +8,12 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/namtt/tutine-trpg/internal/game"
@@ -21,7 +27,7 @@ import (
 // confirmation that the failed turn was not applied to game state.
 const turnFailureMessage = "Người kể chuyện gặp trục trặc và chưa thể phản hồi hợp lệ. Hành động của bạn chưa được ghi nhận, hãy thử lại."
 
-const hiddenHistoryIndicator = "Lịch sử cũ hơn đang ẩn."
+const ambiguousCompletionMessage = "Không thể xác nhận lượt chơi này. Hãy khởi động lại hoặc mở lại phiên trước khi hành động tiếp."
 
 const wideBreakpoint = 90
 
@@ -53,6 +59,16 @@ type pendingTurn struct {
 	action     string
 }
 
+type commandItem struct{ command, description string }
+
+func (i commandItem) FilterValue() string { return i.command + " " + i.description }
+func (i commandItem) Title() string       { return i.command }
+func (i commandItem) Description() string { return i.description }
+
+type tuiKeyMap struct {
+	submit, newline, suggest, palette, pageUp, pageDown, back key.Binding
+}
+
 type tuiModel struct {
 	ctx           context.Context
 	session       orchestrator.GameSession
@@ -64,9 +80,18 @@ type tuiModel struct {
 	selected    int // index into suggestions highlighted by Tab, -1 = none
 
 	input       string
+	editor      textarea.Model
+	spinner     spinner.Model
+	viewport    viewport.Model
+	palette     list.Model
+	help        help.Model
+	keys        tuiKeyMap
 	notice      string // transient message shown above the input line
 	pending     *pendingTurn
 	recoverable bool // true after a failed turn, until retried or cancelled
+	paletteOpen bool
+	locked      bool
+	unseen      bool
 	tempView    tempViewKind
 
 	width  int
@@ -89,12 +114,45 @@ var (
 
 func newTUIModel(session orchestrator.GameSession, providerLabel string) tuiModel {
 	save := session.Save()
+	editor := textarea.New()
+	editor.Prompt = "> "
+	editor.Placeholder = "Bạn muốn làm gì?"
+	editor.DynamicHeight = true
+	editor.MinHeight = 1
+	editor.MaxHeight = 3
+	editor.SetWidth(100)
+	editor.Focus()
+	loading := spinner.New()
+	vp := viewport.New(viewport.WithWidth(100), viewport.WithHeight(12))
+	vp.SoftWrap = true
+	items := []list.Item{
+		commandItem{"/status", "Xem trạng thái nhân vật"}, commandItem{"/inventory", "Xem túi đồ"},
+		commandItem{"/save", "Xem tiến trình đã lưu"}, commandItem{"/help", "Xem hướng dẫn chơi"}, commandItem{"/exit", "Thoát game"},
+	}
+	palette := list.New(items, list.NewDefaultDelegate(), 60, 7)
+	palette.Title = "Lệnh"
+	palette.SetShowHelp(false)
+	palette.SetShowStatusBar(false)
+	helpModel := help.New()
+	helpModel.SetWidth(100)
+	keys := tuiKeyMap{
+		submit: key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "gửi")), newline: key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("Shift+Enter", "xuống dòng")),
+		suggest: key.NewBinding(key.WithKeys("tab"), key.WithHelp("Tab", "gợi ý")), palette: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "lệnh")),
+		pageUp: key.NewBinding(key.WithKeys("pgup"), key.WithHelp("PgUp/PgDn", "lịch sử")), pageDown: key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("PgUp/PgDn", "lịch sử")),
+		back: key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "thoát")),
+	}
 	return tuiModel{
 		ctx:           context.Background(),
 		session:       session,
 		providerLabel: providerLabel,
 		suggestions:   initialSuggestionsFor(save.CurrentScene),
 		selected:      -1,
+		editor:        editor,
+		spinner:       loading,
+		viewport:      vp,
+		palette:       palette,
+		help:          helpModel,
+		keys:          keys,
 		width:         100,
 		height:        30,
 	}
@@ -115,49 +173,133 @@ func (m tuiModel) Init() tea.Cmd {
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.width, m.height = msg.Width, msg.Height
+		m.syncLayout()
+		m.refreshTranscript(false)
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case turnFinishedMsg:
 		return m.applyTurnMsg(msg)
+	case spinner.TickMsg:
+		if m.pending == nil {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	default:
 		return m, nil
 	}
 }
 
 func (m tuiModel) handleKey(msg tea.KeyPressMsg) (tuiModel, tea.Cmd) {
-	key := msg.Key()
-	switch {
-	case key.Code == 'c' && key.Mod&tea.ModCtrl != 0:
+	keyPress := msg.Key()
+	if keyPress.Code == 'c' && keyPress.Mod&tea.ModCtrl != 0 {
 		return m, tea.Quit
-	case key.Code == tea.KeyEsc:
+	}
+	if keyPress.Code == tea.KeyEsc {
 		return m.handleEsc()
-	case key.Code == tea.KeyEnter:
-		if m.pending != nil {
-			return m, nil
-		}
-		text := m.input
-		m.input = ""
-		return m.handleText(m.ctx, text)
-	case key.Code == tea.KeyTab:
-		return m.handleTab(), nil
-	case key.Code == tea.KeyBackspace:
-		if len(m.input) > 0 {
-			runes := []rune(m.input)
-			m.input = string(runes[:len(runes)-1])
-		}
-		m.notice = ""
-		return m, nil
-	case key.Text != "":
-		if m.pending == nil {
-			m.input += key.Text
-			m.notice = ""
-		}
+	}
+	if m.tempView != tempViewNone {
 		return m, nil
 	}
+	if m.paletteOpen {
+		if keyPress.Code == tea.KeyEnter {
+			if m.locked {
+				filter := strings.TrimSpace(m.palette.FilterValue())
+				if filter == "" || strings.EqualFold(filter, "exit") {
+					m.paletteOpen = false
+					return m.handleCommand("/exit")
+				}
+				if item, ok := m.palette.SelectedItem().(commandItem); ok && item.command == "/exit" {
+					m.paletteOpen = false
+					return m.handleCommand("/exit")
+				}
+				return m, nil
+			}
+			if item, ok := m.palette.SelectedItem().(commandItem); ok {
+				m.paletteOpen = false
+				m.editor.Focus()
+				return m.handleCommand(item.command)
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.palette, cmd = m.palette.Update(msg)
+		if keyPress.Text != "" && !paletteFilterMatches(m.palette.FilterValue()) {
+			draft := m.palette.FilterValue()
+			m.paletteOpen = false
+			m.palette.ResetFilter()
+			m.editor.Focus()
+			m.editor.SetValue(draft)
+			m.input = m.editor.Value()
+			return m, nil
+		}
+		return m, cmd
+	}
+	if m.locked && !(keyPress.Text == "/" && m.editor.Value() == "") {
+		return m, nil
+	}
+	if keyPress.Code == tea.KeyEnd {
+		m.viewport.GotoBottom()
+		m.unseen = false
+		return m, nil
+	}
+	if key.Matches(msg, m.keys.pageUp, m.keys.pageDown) {
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		m.unseen = !m.viewport.AtBottom()
+		return m, cmd
+	}
+	if m.pending != nil {
+		return m, nil
+	}
+	if keyPress.Code == tea.KeyEnter && keyPress.Mod&tea.ModShift != 0 {
+		m.editor.InsertString("\n")
+		m.input = m.editor.Value()
+		return m, nil
+	}
+	if keyPress.Code == tea.KeyEnter {
+		text := m.editor.Value()
+		m.input = ""
+		return m.handleText(m.ctx, text)
+	}
+	if key.Matches(msg, m.keys.suggest) {
+		return m.handleTab(), nil
+	}
+	if keyPress.Text == "/" && m.editor.Value() == "" {
+		m.paletteOpen = true
+		m.editor.Blur()
+		if m.locked {
+			m.palette.SetItems([]list.Item{commandItem{"/exit", "Thoát game"}})
+		}
+		m.palette.ResetFilter()
+		m.palette.SetFilterState(list.Filtering)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	if m.input != m.editor.Value() {
+		m.editor.SetValue(m.input)
+	}
+	m.editor, cmd = m.editor.Update(msg)
+	m.input = m.editor.Value()
+	m.notice = ""
+	_ = cmd // textarea cursor-blink work is not needed by the root model.
 	return m, nil
+}
+
+func paletteFilterMatches(filter string) bool {
+	filter = strings.ToLower(strings.TrimSpace(filter))
+	if filter == "" {
+		return true
+	}
+	for _, candidate := range []string{"status xem trạng thái nhân vật", "inventory xem túi đồ", "save xem tiến trình đã lưu", "help xem hướng dẫn chơi", "exit thoát game"} {
+		if strings.Contains(strings.ToLower(candidate), filter) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleEsc is contextual: it closes whatever is currently "on top" (a
@@ -165,12 +307,18 @@ func (m tuiModel) handleKey(msg tea.KeyPressMsg) (tuiModel, tea.Cmd) {
 // quitting the application, per the spec's layered recovery flow.
 func (m tuiModel) handleEsc() (tuiModel, tea.Cmd) {
 	switch {
+	case m.paletteOpen:
+		m.paletteOpen = false
+		m.editor.Focus()
+		return m, nil
 	case m.tempView != tempViewNone:
 		m.tempView = tempViewNone
+		m.editor.Focus()
 		return m, nil
 	case m.recoverable:
 		m.recoverable = false
 		m.input = ""
+		m.editor.SetValue("")
 		m.notice = ""
 		return m, nil
 	default:
@@ -184,11 +332,15 @@ func (m tuiModel) handleTab() tuiModel {
 	}
 	m.selected = (m.selected + 1) % len(m.suggestions)
 	m.input = m.suggestions[m.selected]
+	m.editor.SetValue(m.input)
 	m.notice = ""
 	return m
 }
 
 func (m tuiModel) handleText(ctx context.Context, text string) (tuiModel, tea.Cmd) {
+	if m.locked || m.pending != nil {
+		return m, nil
+	}
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return m, nil
@@ -210,10 +362,15 @@ func (m tuiModel) handleText(ctx context.Context, text string) (tuiModel, tea.Cm
 	}
 
 	m.pending = &pendingTurn{turnNumber: m.session.Save().CurrentTurn + 1, action: text}
-	return m, func() tea.Msg {
+	m.editor.SetValue("")
+	m.input = ""
+	m.editor.Blur()
+	m.refreshTranscript(true)
+	turnCmd := func() tea.Msg {
 		result, err := m.session.HandleTurn(ctx, orchestrator.PlayerInput{Text: text})
 		return turnFinishedMsg{input: text, result: result, err: err}
 	}
+	return m, tea.Batch(turnCmd, m.spinner.Tick)
 }
 
 func parseNumericChoice(text string) (int, bool) {
@@ -246,6 +403,7 @@ func (m tuiModel) handleCommand(command string) (tuiModel, tea.Cmd) {
 }
 
 func (m tuiModel) applyTurnMsg(msg turnFinishedMsg) (tuiModel, tea.Cmd) {
+	wasFollowing := m.viewport.AtBottom()
 	m.pending = nil
 	if msg.err != nil {
 		if m.logger != nil {
@@ -253,13 +411,24 @@ func (m tuiModel) applyTurnMsg(msg turnFinishedMsg) (tuiModel, tea.Cmd) {
 		}
 		m.recoverable = true
 		m.input = msg.input
+		m.editor.SetValue(msg.input)
+		m.editor.Focus()
 		m.notice = turnFailureMessage
+		m.refreshTranscript(wasFollowing)
 		return m, nil
 	}
 	m.recoverable = false
 	m.notice = ""
 	if msg.result == nil {
-		m.notice = "lượt chơi không có kết quả"
+		if m.logger != nil {
+			m.logger.Printf("ambiguous turn completion (input=%q): nil result without error", msg.input)
+		}
+		m.locked = true
+		m.editor.Blur()
+		m.editor.SetValue("")
+		m.input = ""
+		m.notice = ambiguousCompletionMessage
+		m.refreshTranscript(wasFollowing)
 		return m, nil
 	}
 
@@ -272,33 +441,37 @@ func (m tuiModel) applyTurnMsg(msg turnFinishedMsg) (tuiModel, tea.Cmd) {
 	})
 	m.suggestions = append([]string{}, msg.result.SuggestedActions...)
 	m.selected = -1
+	m.editor.Focus()
+	m.refreshTranscript(wasFollowing)
 	return m, nil
 }
 
 func (m tuiModel) View() tea.View {
 	save := m.session.Save()
+	m.syncLayout()
+	m.refreshTranscript(m.viewport.GetContent() == "")
+	if m.tempView != tempViewNone {
+		m.viewport.SetContent(m.renderTempViewBody(save))
+	}
 	header := renderHeader(save)
 	action := m.renderActionArea()
-
-	if m.tempView != tempViewNone {
-		return tea.View{Content: strings.Join([]string{header, m.renderTempViewBody(save), action}, "\n\n"), AltScreen: true}
+	if m.height < 8 {
+		return tea.View{Content: strings.Join([]string{"Cửa sổ quá thấp, hãy đổi kích thước (tối thiểu 8 hàng).", m.editor.View(), m.help.ShortHelpView([]key.Binding{m.keys.back})}, "\n"), AltScreen: true}
 	}
-
-	history := clipHistory(m.historyText(save), m.historyBudget())
-	summary := renderSummary(save)
-
-	if m.width > wideBreakpoint {
-		// summary is already a fully rendered bordered block; measure its
-		// real cell width instead of wrapping it in a second Width() style,
-		// which would re-wrap the box-drawing characters themselves and
-		// corrupt the border.
-		rightWidth := lipgloss.Width(summary)
-		mainWidth := max(m.width-rightWidth-2, 40)
-		left := lipgloss.NewStyle().Width(mainWidth).Render(history)
-		body := lipgloss.JoinHorizontal(lipgloss.Top, left, summary)
-		return tea.View{Content: strings.Join([]string{header, body, action}, "\n\n"), AltScreen: true}
+	body := m.viewport.View()
+	if m.width > wideBreakpoint && m.tempView == tempViewNone {
+		summary := renderSummary(save)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(max(m.width-lipgloss.Width(summary)-2, 20)).Render(body), summary)
+		return tea.View{Content: strings.Join([]string{header, body, action}, "\n"), AltScreen: true}
 	}
-	return tea.View{Content: strings.Join([]string{header, summary, history, action}, "\n\n"), AltScreen: true}
+	if m.height < 14 {
+		return tea.View{Content: strings.Join([]string{header, renderCompactSummary(save), body, action}, "\n"), AltScreen: true}
+	}
+	return tea.View{Content: strings.Join([]string{header, renderSummary(save), body, action}, "\n"), AltScreen: true}
+}
+
+func renderCompactSummary(save game.SaveGame) string {
+	return fmt.Sprintf("%s %d · HP %d/%d · Linh lực %d/%d · Túi %d", realmName(save.Player.Realm), save.Player.Stage, save.Player.HP, save.Player.MaxHP, save.Player.SpiritualEnergy, save.Player.MaxEnergy, inventoryCount(save))
 }
 
 func renderHeader(save game.SaveGame) string {
@@ -309,6 +482,45 @@ func renderSummary(save game.SaveGame) string {
 	return panelStyle.Render(fmt.Sprintf("%s tầng %d | HP %d/%d | Linh lực %d/%d | Túi đồ %d món",
 		realmName(save.Player.Realm), save.Player.Stage, save.Player.HP, save.Player.MaxHP,
 		save.Player.SpiritualEnergy, save.Player.MaxEnergy, inventoryCount(save)))
+}
+
+func (m *tuiModel) syncLayout() {
+	width := max(m.width, 20)
+	editorHeight := 3
+	if m.height < 14 {
+		editorHeight = 1
+	}
+	m.editor.SetWidth(width)
+	m.editor.SetHeight(editorHeight)
+	m.palette.SetSize(min(width, 60), min(7, max(m.height-4, 1)))
+	m.help.SetWidth(width)
+	viewportWidth := width
+	reservedRows := 3 // header, action area, and their two separators in wide layout
+	if width > wideBreakpoint && m.tempView == tempViewNone {
+		viewportWidth = max(width-lipgloss.Width(renderSummary(m.session.Save()))-2, 20)
+	} else {
+		reservedRows += 1 // narrow layouts render a summary below the header
+		if m.height >= 14 {
+			reservedRows += lipgloss.Height(renderSummary(m.session.Save())) - 1
+		}
+		reservedRows++ // third separator between header, summary, viewport, and action
+	}
+	m.viewport.SetWidth(viewportWidth)
+	m.viewport.SetHeight(max(m.height-lipgloss.Height(m.renderActionArea())-reservedRows, 1))
+}
+
+func (m tuiModel) actionRows() int {
+	return lipgloss.Height(m.renderActionArea())
+}
+
+func (m *tuiModel) refreshTranscript(follow bool) {
+	m.viewport.SetContent(m.historyText(m.session.Save()))
+	if follow {
+		m.viewport.GotoBottom()
+		m.unseen = false
+	} else if !m.viewport.AtBottom() {
+		m.unseen = true
+	}
 }
 
 func (m tuiModel) historyText(save game.SaveGame) string {
@@ -358,57 +570,44 @@ func renderPendingBlock(p pendingTurn) string {
 	return fmt.Sprintf("Lượt %02d\nBạn: %s", p.turnNumber, p.action)
 }
 
-// historyBudget reserves lines for the header, summary (on narrow layouts),
-// and action area so the history region clips instead of pushing the
-// always-visible regions off-screen.
-func (m tuiModel) historyBudget() int {
-	reserved := 10
-	if m.width <= wideBreakpoint {
-		reserved += 4
-	}
-	return max(m.height-reserved, 5)
-}
-
-func clipHistory(text string, budget int) string {
-	lines := strings.Split(text, "\n")
-	if len(lines) <= budget {
-		return text
-	}
-	keep := max(budget-1, 1)
-	clipped := append([]string{hiddenHistoryIndicator}, lines[len(lines)-keep:]...)
-	return strings.Join(clipped, "\n")
-}
-
 func (m tuiModel) renderActionArea() string {
+	if m.paletteOpen {
+		return strings.Join([]string{m.palette.View(), hintStyle.Render("Enter chọn · ↑/↓ di chuyển · Esc quay lại")}, "\n")
+	}
+	if m.locked {
+		return strings.Join([]string{errorStyle.Render(ambiguousCompletionMessage), hintStyle.Render("Nhập liệu đã khóa · Esc thoát")}, "\n")
+	}
 	if m.pending != nil {
-		return hintStyle.Render("Đang xử lý lượt chơi...")
+		return strings.Join([]string{m.spinner.View() + " Đang xử lý lượt chơi...", hintStyle.Render("Đang xử lý lượt chơi… · PgUp/PgDn lịch sử")}, "\n")
 	}
 	if m.tempView != tempViewNone {
-		return strings.Join([]string{"> " + m.input, hintStyle.Render("Esc quay lại")}, "\n")
+		return hintStyle.Render("Enter chọn · ↑/↓ di chuyển · Esc quay lại")
 	}
-
 	var parts []string
-	if strings.HasPrefix(m.input, "/") {
-		parts = append(parts, renderCommandPalette())
-	} else {
+	if m.height >= 14 {
 		parts = append(parts, m.renderSuggestions())
-		if len(m.turns) == 0 {
-			parts = append(parts, "Bạn muốn làm gì? Ví dụ: ta quan sát cổng môn")
-		}
+	} else {
+		parts = append(parts, strings.ReplaceAll(m.renderSuggestions(), "\n", " · "))
+	}
+	if len(m.turns) == 0 {
+		parts = append(parts, "Bạn muốn làm gì? Ví dụ: ta quan sát cổng môn")
 	}
 	if m.notice != "" {
 		parts = append(parts, m.renderNotice())
 	}
-	parts = append(parts, "> "+m.input)
+	if m.unseen {
+		parts = append(parts, hintStyle.Render("↓ Có lượt mới (End để xem)"))
+	}
+	parts = append(parts, m.editor.View())
 	parts = append(parts, hintStyle.Render(m.footer()))
 	return strings.Join(parts, "\n")
 }
 
 func (m tuiModel) footer() string {
 	if m.recoverable {
-		return "Enter thử lại | Sửa nội dung trước khi gửi | Esc huỷ"
+		return "Enter thử lại · sửa nội dung trước khi gửi · Esc huỷ"
 	}
-	return "Enter gửi | Tab chọn gợi ý | / lệnh | Esc thoát"
+	return m.help.ShortHelpView([]key.Binding{m.keys.submit, m.keys.newline, m.keys.suggest, m.keys.palette, m.keys.pageUp, m.keys.back})
 }
 
 func (m tuiModel) renderNotice() string {
@@ -470,9 +669,12 @@ func helpText(providerLabel string) string {
 		"- Nhập hành động tự do, ví dụ: ta quan sát cổng môn.",
 		"- Nhập số để chọn một gợi ý đang hiển thị.",
 		"- Nhấn Tab để đưa gợi ý hiện tại vào ô nhập, có thể sửa trước khi gửi.",
+		"- Enter gửi; Shift+Enter xuống dòng trong hành động nhiều dòng.",
+		"- PgUp/PgDn cuộn lịch sử; End trở về lượt mới nhất.",
+		"- Gõ / để mở bảng lệnh, rồi lọc và chọn bằng Enter.",
 		"- Lệnh: /status, /inventory, /save, /help, /exit.",
 		"- Tiến trình được lưu tự động sau mỗi lượt và tự tiếp tục ở lần chơi sau.",
-		"- Esc đóng màn hình đang xem hoặc thoát game.",
+		"- Esc đóng bảng lệnh/màn hình tạm, huỷ bản nháp lỗi, rồi mới thoát game.",
 	}
 	if strings.TrimSpace(providerLabel) != "" {
 		lines = append(lines, "Mô hình đang dùng: "+providerLabel)

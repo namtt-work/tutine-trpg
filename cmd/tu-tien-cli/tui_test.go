@@ -27,7 +27,7 @@ func TestTUIFreeTextSubmitsTurn(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil, want async turn command")
 	}
-	model, _ = model.applyTurnMsg(cmd().(turnFinishedMsg))
+	model, _ = model.applyTurnMsg(runTurnCommand(t, cmd))
 
 	if got, want := session.inputs, []string{"ta quan sát cổng môn"}; !equalStrings(got, want) {
 		t.Fatalf("inputs = %#v, want %#v", got, want)
@@ -50,7 +50,7 @@ func TestTUINumberSelectsRoleplaySuggestion(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil, want async turn command")
 	}
-	model, _ = model.applyTurnMsg(cmd().(turnFinishedMsg))
+	model, _ = model.applyTurnMsg(runTurnCommand(t, cmd))
 
 	if got, want := session.inputs, []string{"Quan sát xung quanh"}; !equalStrings(got, want) {
 		t.Fatalf("inputs = %#v, want %#v", got, want)
@@ -86,7 +86,7 @@ func TestTUITurnErrorIsRendered(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil, want async turn command")
 	}
-	model, _ = model.applyTurnMsg(cmd().(turnFinishedMsg))
+	model, _ = model.applyTurnMsg(runTurnCommand(t, cmd))
 
 	view := model.View().Content
 	if strings.Contains(view, "provider unavailable") {
@@ -266,6 +266,27 @@ func TestTUIKeyPressAppendsVietnameseText(t *testing.T) {
 	}
 }
 
+func TestTUITextareaKeepsMultilineVietnameseDraft(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+
+	updated, _ := model.Update(keyPress('đ', "đ"))
+	model = updated.(tuiModel)
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}))
+	model = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("Shift+Enter should insert a newline instead of submitting")
+	}
+	updated, _ = model.Update(keyPress('ạ', "ạ"))
+	model = updated.(tuiModel)
+
+	if got, want := model.editor.Value(), "đ\nạ"; got != want {
+		t.Fatalf("textarea draft = %q, want %q", got, want)
+	}
+	if model.pending != nil {
+		t.Fatal("Shift+Enter should not submit a turn")
+	}
+}
+
 func TestTUIPendingTurnBlocksDuplicateSubmission(t *testing.T) {
 	session := &recordingSession{
 		save:    game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"}),
@@ -300,6 +321,24 @@ func TestTUIPendingTurnBlocksDuplicateSubmission(t *testing.T) {
 	}
 }
 
+func TestTUIPendingTurnStartsSpinnerAndDisablesEditor(t *testing.T) {
+	session := &recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}
+	model := newTUIModel(session, "test-model")
+	model.editor.SetValue("ta quan sát")
+	model.input = model.editor.Value()
+
+	model, cmd := model.handleText(context.Background(), model.editor.Value())
+	if model.pending == nil || model.editor.Focused() {
+		t.Fatal("submitting should mark the turn pending and disable the editor")
+	}
+	if cmd == nil {
+		t.Fatal("submitting should schedule both turn completion and spinner work")
+	}
+	if model.spinner.View() == "" {
+		t.Fatal("pending model should own a spinner")
+	}
+}
+
 func TestTUIFailedTurnRestoresInputAndAllowsRetry(t *testing.T) {
 	session := &failingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"}), err: errors.New("provider unavailable")}
 	model := newTUIModel(session, "test-model")
@@ -308,7 +347,7 @@ func TestTUIFailedTurnRestoresInputAndAllowsRetry(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("cmd is nil, want async turn command")
 	}
-	model, _ = model.applyTurnMsg(cmd().(turnFinishedMsg))
+	model, _ = model.applyTurnMsg(runTurnCommand(t, cmd))
 
 	if model.input != "ta hoi de tu gac cong" {
 		t.Fatalf("input = %q, want original action restored for retry", model.input)
@@ -357,7 +396,7 @@ func TestTUIDoesNotRenderRawIDs(t *testing.T) {
 	}
 }
 
-func TestTUINarrowLayoutKeepsActionAreaAndShowsHiddenHistoryIndicator(t *testing.T) {
+func TestTUINarrowLayoutKeepsActionAreaAndShowsViewportHistory(t *testing.T) {
 	session := &recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}
 	model := newTUIModel(session, "test-model")
 	model.width = 60
@@ -370,12 +409,117 @@ func TestTUINarrowLayoutKeepsActionAreaAndShowsHiddenHistoryIndicator(t *testing
 		})
 	}
 
+	model.syncLayout()
+	model.refreshTranscript(false)
 	view := model.View().Content
-	if !strings.Contains(view, "Enter gửi") {
-		t.Fatalf("action area missing from narrow view:\n%s", view)
+	if model.editor.Height() < 1 || model.editor.Height() > 3 {
+		t.Fatalf("editor height = %d, want bounded visible action editor", model.editor.Height())
 	}
-	if !strings.Contains(view, hiddenHistoryIndicator) {
-		t.Fatalf("view missing hidden-history indicator:\n%s", view)
+	if strings.Contains(view, "Lịch sử cũ hơn đang ẩn.") {
+		t.Fatalf("view must not destructively clip history:\n%s", view)
+	}
+	if got, want := model.historyText(session.save), model.viewport.GetContent(); got != want {
+		t.Fatalf("viewport content was truncated\ngot: %q\nwant: %q", got, want)
+	}
+}
+
+func TestTUINarrowNormalHeightFitsFooterAndEditor(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 14
+	model.syncLayout()
+	view := model.View().Content
+	if model.editor.Height() != 3 {
+		t.Fatalf("editor height = %d, want bounded normal-layout height", model.editor.Height())
+	}
+	if rows := strings.Count(view, "\n") + 1; rows > model.height {
+		t.Fatalf("rendered rows = %d, exceed terminal height %d:\n%s", rows, model.height, view)
+	}
+}
+
+func TestTUIWideViewportUsesTranscriptColumnWidth(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 100, 20
+	model.turns = append(model.turns, turnBlock{turnNumber: 1, narration: strings.Repeat("một dòng dài ", 20)})
+	model.syncLayout()
+	model.refreshTranscript(true)
+	if model.viewport.Width() >= model.width {
+		t.Fatalf("wide viewport width = %d, want a narrower transcript column than %d", model.viewport.Width(), model.width)
+	}
+}
+
+func TestTUIAmbiguousCompletionLocksSubmission(t *testing.T) {
+	session := &recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}
+	model := newTUIModel(session, "test-model")
+	model, _ = model.applyTurnMsg(turnFinishedMsg{input: "ta quan sát"})
+	if !model.locked || model.editor.Focused() || model.input != "" {
+		t.Fatalf("ambiguous result should lock and clear input: %#v", model)
+	}
+	updated, cmd := model.Update(keyPress('a', "a"))
+	model = updated.(tuiModel)
+	if cmd != nil || model.editor.Value() != "" {
+		t.Fatal("locked input must ignore printable text")
+	}
+	model, cmd = model.handleText(context.Background(), "ta thử lại")
+	if cmd != nil || len(session.inputs) != 0 {
+		t.Fatal("locked mode must never submit another turn")
+	}
+}
+
+func TestTUIPaletteFiltersAndEscRestoresDraft(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	updated, _ := model.Update(keyPress('/', "/"))
+	model = updated.(tuiModel)
+	for _, r := range "túi" {
+		updated, _ = model.Update(keyPress(r, string(r)))
+		model = updated.(tuiModel)
+	}
+	if model.palette.FilterValue() != "túi" {
+		t.Fatalf("palette filter = %q, want interactive filter text", model.palette.FilterValue())
+	}
+	model.editor.SetValue("bản nháp")
+	model.input = "bản nháp"
+	updated, cmd := model.Update(keyPress(tea.KeyEsc, ""))
+	model = updated.(tuiModel)
+	if cmd != nil || model.paletteOpen || !model.editor.Focused() || model.editor.Value() != "bản nháp" {
+		t.Fatal("Esc should close palette and restore the exact editable draft")
+	}
+}
+
+func TestTUIPaletteClosesForNonCommandText(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	updated, _ := model.Update(keyPress('/', "/"))
+	model = updated.(tuiModel)
+	updated, cmd := model.Update(keyPress('z', "z"))
+	model = updated.(tuiModel)
+	if cmd != nil || model.paletteOpen || !model.editor.Focused() || model.editor.Value() != "z" {
+		t.Fatal("non-command text should close the palette and return to the editor")
+	}
+}
+
+func TestTUIHelpExplainsMultilineHistoryPaletteAndEscPrecedence(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model, _ = model.handleCommand("/help")
+	view := model.View().Content
+	for _, instruction := range []string{"Shift+Enter", "PgUp/PgDn", "bảng lệnh", "rồi mới thoát"} {
+		if !strings.Contains(view, instruction) {
+			t.Fatalf("help missing %q:\n%s", instruction, view)
+		}
+	}
+}
+
+func TestTUIViewportPreservesManualScrollAndMarksUnseen(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 50, 14
+	for i := range 20 {
+		model.turns = append(model.turns, turnBlock{turnNumber: i + 1, narration: "dòng lịch sử"})
+	}
+	model.syncLayout()
+	model.refreshTranscript(true)
+	model.viewport.GotoTop()
+	model.turns = append(model.turns, turnBlock{turnNumber: 21, narration: "lượt mới"})
+	model.refreshTranscript(false)
+	if model.viewport.AtBottom() || !model.unseen {
+		t.Fatal("new content must not pull a manually scrolled transcript to bottom")
 	}
 }
 
@@ -401,6 +545,85 @@ func TestTUISaveCommandShowsTurnWithoutRawIDOrPath(t *testing.T) {
 	}
 }
 
+func TestTUITemporaryHelpFitsSupportedShortTerminal(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 14
+	model, _ = model.handleCommand("/help")
+	view := model.View().Content
+	if rows := strings.Count(view, "\n") + 1; rows > model.height {
+		t.Fatalf("temporary help rows = %d, exceed terminal height %d:\n%s", rows, model.height, view)
+	}
+}
+
+func TestTUIPaletteFallbackKeepsCompleteTypedDraft(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	updated, _ := model.Update(keyPress('/', "/"))
+	model = updated.(tuiModel)
+	for _, r := range "helo" {
+		updated, _ = model.Update(keyPress(r, string(r)))
+		model = updated.(tuiModel)
+	}
+	if model.paletteOpen || !model.editor.Focused() || model.editor.Value() != "helo" {
+		t.Fatalf("palette fallback lost draft: open=%t focused=%t draft=%q", model.paletteOpen, model.editor.Focused(), model.editor.Value())
+	}
+}
+
+func TestTUIAmbiguousCompletionIgnoresTranscriptNavigation(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 50, 14
+	for i := range 20 {
+		model.turns = append(model.turns, turnBlock{turnNumber: i + 1, narration: "dòng lịch sử"})
+	}
+	model.syncLayout()
+	model.refreshTranscript(true)
+	model, _ = model.applyTurnMsg(turnFinishedMsg{input: "ta quan sát"})
+	model.viewport.GotoTop()
+	offset := model.viewport.YOffset()
+	updated, cmd := model.Update(keyPress(tea.KeyEnd, ""))
+	model = updated.(tuiModel)
+	if cmd != nil || model.viewport.YOffset() != offset {
+		t.Fatal("locked mode must ignore transcript navigation")
+	}
+}
+
+func TestTUIAmbiguousCompletionPaletteOffersOnlyExit(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model, _ = model.applyTurnMsg(turnFinishedMsg{input: "ta quan sát"})
+	updated, _ := model.Update(keyPress('/', "/"))
+	model = updated.(tuiModel)
+	items := model.palette.Items()
+	if len(items) != 1 {
+		t.Fatalf("locked palette has %d items, want only /exit", len(items))
+	}
+	item, ok := items[0].(commandItem)
+	if !ok || item.command != "/exit" {
+		t.Fatalf("locked palette exposes %#v, want only /exit", items[0])
+	}
+	updated, cmd := model.Update(keyPress(tea.KeyEnter, ""))
+	model = updated.(tuiModel)
+	if model.tempView != tempViewNone || !model.locked {
+		t.Fatal("locked palette must not open a temporary view or unlock the model")
+	}
+	assertQuitCommand(t, cmd)
+}
+
+func TestTUIAmbiguousCompletionAllowsExitCommand(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model, _ = model.applyTurnMsg(turnFinishedMsg{input: "ta quan sát"})
+	updated, _ := model.Update(keyPress('/', "/"))
+	model = updated.(tuiModel)
+	for _, r := range "exit" {
+		updated, _ = model.Update(keyPress(r, string(r)))
+		model = updated.(tuiModel)
+	}
+	updated, cmd := model.Update(keyPress(tea.KeyEnter, ""))
+	model = updated.(tuiModel)
+	if !model.locked {
+		t.Fatal("exit control must not unlock ambiguous completion")
+	}
+	assertQuitCommand(t, cmd)
+}
+
 func keyPress(code rune, text string) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Text: text})
 }
@@ -413,6 +636,25 @@ func assertQuitCommand(t *testing.T, cmd tea.Cmd) {
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatalf("command message = %T, want tea.QuitMsg", cmd())
 	}
+}
+
+func runTurnCommand(t *testing.T, cmd tea.Cmd) turnFinishedMsg {
+	t.Helper()
+	msg := cmd()
+	if result, ok := msg.(turnFinishedMsg); ok {
+		return result
+	}
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("command message = %T, want turnFinishedMsg or tea.BatchMsg", msg)
+	}
+	for _, next := range batch {
+		if result, ok := next().(turnFinishedMsg); ok {
+			return result
+		}
+	}
+	t.Fatal("batch did not include a turn completion")
+	return turnFinishedMsg{}
 }
 
 type failingSession struct {
