@@ -605,12 +605,11 @@ func (m tuiModel) renderCondensedShell(save game.SaveGame) string {
 	actionLines := strings.Split(action, "\n")
 	viewport := m.viewport
 	viewport.SetWidth(width)
-	viewport.SetHeight(max(m.height-len(actionLines)-3-boolToInt(m.unseen), 1))
+	viewport.SetHeight(max(m.height-len(actionLines)-2-boolToInt(m.unseen), 2))
 
 	lines := []string{
 		truncateCells("TUTINE TRPG · "+sceneName(save.CurrentScene)+fmt.Sprintf(" · Lượt %02d", save.CurrentTurn+1), width),
 		truncateCells(renderCompactSummary(save), width),
-		"NHẬT KÝ HÀNH TRÌNH",
 	}
 	lines = append(lines, strings.Split(viewport.View(), "\n")...)
 	if m.unseen {

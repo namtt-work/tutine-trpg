@@ -956,3 +956,35 @@ func (s *failingSession) HandleTurn(ctx context.Context, input orchestrator.Play
 func (s *failingSession) Save() game.SaveGame {
 	return s.save
 }
+
+func TestTUICondensedShellKeepsTwoViewportRowsWithoutSectionLabel(t *testing.T) {
+	for _, height := range []int{14, 15, 16, 17} {
+		t.Run(fmt.Sprintf("60x%d", height), func(t *testing.T) {
+			model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+			model.width, model.height = 60, height
+			model.syncLayout()
+			model, _ = model.applyTurnMsg(turnFinishedMsg{input: "ta quan sát", result: &game.TurnResult{
+				Narration:        "Bạn đứng trước cổng môn.",
+				SuggestedActions: []string{"Quan sát cổng môn", "Hỏi đệ tử", "Kiểm tra trạng thái"},
+			}})
+			view := model.View().Content
+			if strings.Contains(view, "NHẬT KÝ HÀNH TRÌNH") {
+				t.Fatalf("condensed shell must not render the transcript section label:\n%s", view)
+			}
+			if rows := strings.Count(view, "\n") + 1; rows > model.height {
+				t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, model.height, view)
+			}
+			lines := strings.Split(view, "\n")
+			vpRows := 0
+			for _, line := range lines[2:] { // skip header + summary, stop at first suggestion row
+				if strings.HasPrefix(line, "1. ") {
+					break
+				}
+				vpRows++
+			}
+			if vpRows < 2 {
+				t.Fatalf("condensed viewport rows = %d, want >= 2:\n%s", vpRows, view)
+			}
+		})
+	}
+}
