@@ -13,6 +13,7 @@ import (
 	"github.com/namtt/tutine-trpg/internal/game"
 	"github.com/namtt/tutine-trpg/internal/llm"
 	"github.com/namtt/tutine-trpg/internal/memory"
+	"github.com/namtt/tutine-trpg/internal/storage"
 )
 
 type extractorFailingClient struct {
@@ -98,6 +99,38 @@ func (*recordingStore) Close() error {
 	return nil
 }
 
+type fakeStore struct {
+	snapshotErr error
+	eventErr    error
+	snapshots   []game.SaveGame
+	events      []storage.Event
+	callOrder   []string
+}
+
+func (s *fakeStore) SaveSnapshot(_ context.Context, save game.SaveGame) error {
+	s.callOrder = append(s.callOrder, "snapshot")
+	s.snapshots = append(s.snapshots, save)
+	return s.snapshotErr
+}
+
+func (s *fakeStore) LoadSnapshot(context.Context, string) (game.SaveGame, error) {
+	return game.SaveGame{}, errors.New("fakeStore: LoadSnapshot not used by HandleTurn tests")
+}
+
+func (s *fakeStore) AppendEvent(_ context.Context, _ string, event storage.Event) error {
+	s.callOrder = append(s.callOrder, "event")
+	s.events = append(s.events, event)
+	return s.eventErr
+}
+
+func (s *fakeStore) ListSaves(context.Context, string) ([]storage.SaveSummary, error) {
+	return nil, nil
+}
+
+func (s *fakeStore) AcquireLock(context.Context, string) (storage.Lock, error) {
+	return nil, errors.New("fakeStore: AcquireLock not used by HandleTurn tests")
+}
+
 func TestHandleTurnReturnsNarrationAndAdvancesTurn(t *testing.T) {
 	ctx := context.Background()
 	store, err := memory.NewSQLiteStore(ctx, filepath.Join(t.TempDir(), "game.db"))
@@ -107,7 +140,7 @@ func TestHandleTurnReturnsNarrationAndAdvancesTurn(t *testing.T) {
 	defer store.Close()
 
 	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
-	session := NewSession(save, llm.FakeClient{}, store, []string{"trust", "secret"})
+	session := NewSession(save, llm.FakeClient{}, store, &fakeStore{}, []string{"trust", "secret"})
 
 	result, err := session.HandleTurn(ctx, PlayerInput{Text: "ta quan sat cong mon"})
 	if err != nil {
@@ -123,7 +156,7 @@ func TestHandleTurnReturnsNarrationAndAdvancesTurn(t *testing.T) {
 
 func TestHandleTurnProvidesRecentNarrationToNextTurn(t *testing.T) {
 	client := &continuityClient{}
-	session := NewSession(game.NewStarterSave(game.NewGameRequest{Name: "Nam"}), client, &recordingStore{}, nil)
+	session := NewSession(game.NewStarterSave(game.NewGameRequest{Name: "Nam"}), client, &recordingStore{}, &fakeStore{}, nil)
 
 	if _, err := session.HandleTurn(context.Background(), PlayerInput{Text: "ta bước tới"}); err != nil {
 		t.Fatalf("first HandleTurn returned error: %v", err)
@@ -150,7 +183,7 @@ func TestHandleTurnReturnsResolvedTurnWhenMemoryExtractionFails(t *testing.T) {
 	defer store.Close()
 
 	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
-	session := NewSession(save, extractorFailingClient{}, store, []string{"trust", "secret"})
+	session := NewSession(save, extractorFailingClient{}, store, &fakeStore{}, []string{"trust", "secret"})
 
 	result, err := session.HandleTurn(ctx, PlayerInput{Text: "ta quan sat cong mon"})
 	if err != nil {
@@ -173,7 +206,7 @@ func TestHandleTurnRejectsInvalidLLMEffectsWithoutFailingTurn(t *testing.T) {
 	defer store.Close()
 
 	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
-	session := NewSession(save, invalidEffectsClient{}, store, []string{"trust", "secret"})
+	session := NewSession(save, invalidEffectsClient{}, store, &fakeStore{}, []string{"trust", "secret"})
 
 	result, err := session.HandleTurn(ctx, PlayerInput{Text: "bắt đầu"})
 	if err != nil {
@@ -196,7 +229,7 @@ func TestHandleTurnRejectsInvalidLLMEffectsWithoutFailingTurn(t *testing.T) {
 func TestHandleTurnUsesToolCapableClientRollCheck(t *testing.T) {
 	client := &toolLoopClient{}
 	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
-	session := NewSession(save, client, &recordingStore{}, nil)
+	session := NewSession(save, client, &recordingStore{}, &fakeStore{}, nil)
 	session.rollFunc = func() int { return 10 }
 
 	result, err := session.HandleTurn(context.Background(), PlayerInput{Text: "ta dò xét chấp sự"})
@@ -221,7 +254,7 @@ func TestHandleTurnUsesToolCapableClientRollCheck(t *testing.T) {
 
 func TestExecuteToolRejectsUnknownStat(t *testing.T) {
 	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam"})
-	session := NewSession(save, llm.FakeClient{}, nil, nil)
+	session := NewSession(save, llm.FakeClient{}, nil, &fakeStore{}, nil)
 
 	_, err := session.executeTool(context.Background(), llm.ToolCall{ID: "call_1", Name: "roll_check", Arguments: json.RawMessage(`{"stat":"charisma","difficulty":5}`)})
 	if err == nil {
@@ -231,7 +264,7 @@ func TestExecuteToolRejectsUnknownStat(t *testing.T) {
 
 func TestExecuteToolRejectsUnknownToolName(t *testing.T) {
 	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam"})
-	session := NewSession(save, llm.FakeClient{}, nil, nil)
+	session := NewSession(save, llm.FakeClient{}, nil, &fakeStore{}, nil)
 
 	_, err := session.executeTool(context.Background(), llm.ToolCall{ID: "call_1", Name: "teleport", Arguments: json.RawMessage(`{}`)})
 	if err == nil {
@@ -241,7 +274,7 @@ func TestExecuteToolRejectsUnknownToolName(t *testing.T) {
 
 func TestSaveReturnsIndependentCopy(t *testing.T) {
 	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", Traits: []string{"careful"}, CampaignID: "thanh-van-sect"})
-	session := NewSession(save, llm.FakeClient{}, nil, nil)
+	session := NewSession(save, llm.FakeClient{}, nil, &fakeStore{}, nil)
 
 	returnedSave := session.Save()
 	returnedSave.Inventory["moonlit_grass"] = 1
@@ -267,7 +300,7 @@ func TestHandleTurnForwardsAllRetrievalPlanFilters(t *testing.T) {
 		Keywords:    []string{"linh can"},
 		MaxResults:  3,
 	}
-	session := NewSession(game.NewStarterSave(game.NewGameRequest{Name: "Nam"}), plannedRetrievalClient{plan: plan}, store, nil)
+	session := NewSession(game.NewStarterSave(game.NewGameRequest{Name: "Nam"}), plannedRetrievalClient{plan: plan}, store, &fakeStore{}, nil)
 
 	_, err := session.HandleTurn(context.Background(), PlayerInput{Text: "ta hoi tham tin tuc"})
 	if err != nil {
@@ -290,7 +323,7 @@ func TestHandleTurnForwardsAllRetrievalPlanFilters(t *testing.T) {
 
 func TestHandleTurnRejectsEmptyInputWithoutAdvancingState(t *testing.T) {
 	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam"})
-	session := NewSession(save, llm.FakeClient{}, &recordingStore{}, nil)
+	session := NewSession(save, llm.FakeClient{}, &recordingStore{}, &fakeStore{}, nil)
 
 	_, err := session.HandleTurn(context.Background(), PlayerInput{Text: " \t "})
 	if err == nil {
@@ -302,5 +335,65 @@ func TestHandleTurnRejectsEmptyInputWithoutAdvancingState(t *testing.T) {
 	}
 	if after.Player.SpiritualEnergy != save.Player.SpiritualEnergy {
 		t.Fatalf("energy = %d, want %d", after.Player.SpiritualEnergy, save.Player.SpiritualEnergy)
+	}
+}
+
+func TestHandleTurnPersistsSnapshotAndEventInOrder(t *testing.T) {
+	ctx := context.Background()
+	memStore, err := memory.NewSQLiteStore(ctx, filepath.Join(t.TempDir(), "game.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer memStore.Close()
+
+	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
+	store := &fakeStore{}
+	session := NewSession(save, llm.FakeClient{}, memStore, store, []string{"trust", "secret"})
+
+	result, err := session.HandleTurn(ctx, PlayerInput{Text: "ta quan sat cong mon"})
+	if err != nil {
+		t.Fatalf("HandleTurn returned error: %v", err)
+	}
+	if result.Narration == "" {
+		t.Fatal("expected narration")
+	}
+	if len(store.snapshots) != 1 || store.snapshots[0].CurrentTurn != 1 {
+		t.Fatalf("snapshots = %#v, want one snapshot at turn 1", store.snapshots)
+	}
+	if len(store.events) != 1 || store.events[0].Turn != 1 || store.events[0].Type != storage.EventTypeTurnResolved {
+		t.Fatalf("events = %#v, want one turn_resolved event at turn 1", store.events)
+	}
+	if !reflect.DeepEqual(store.callOrder, []string{"snapshot", "event"}) {
+		t.Fatalf("call order = %#v, want snapshot before event", store.callOrder)
+	}
+}
+
+func TestHandleTurnWarnsButDoesNotFailWhenPersistenceFails(t *testing.T) {
+	ctx := context.Background()
+	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
+	store := &fakeStore{snapshotErr: errors.New("disk full"), eventErr: errors.New("disk full")}
+	session := NewSession(save, llm.FakeClient{}, &recordingStore{}, store, nil)
+
+	result, err := session.HandleTurn(ctx, PlayerInput{Text: "ta quan sat cong mon"})
+	if err != nil {
+		t.Fatalf("HandleTurn returned error: %v", err)
+	}
+	if result.Narration == "" {
+		t.Fatal("expected narration despite persistence failure")
+	}
+	foundSnapshotWarning, foundEventWarning := false, false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "save persistence failed") {
+			foundSnapshotWarning = true
+		}
+		if strings.Contains(w, "event log write failed") {
+			foundEventWarning = true
+		}
+	}
+	if !foundSnapshotWarning || !foundEventWarning {
+		t.Fatalf("warnings = %#v, want both save and event failure warnings", result.Warnings)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("events = %d, want AppendEvent still attempted once even though SaveSnapshot failed", len(store.events))
 	}
 }

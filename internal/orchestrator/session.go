@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/namtt/tutine-trpg/internal/game"
 	"github.com/namtt/tutine-trpg/internal/llm"
 	"github.com/namtt/tutine-trpg/internal/memory"
+	"github.com/namtt/tutine-trpg/internal/storage"
 )
 
 type PlayerInput struct {
@@ -26,6 +28,7 @@ type Session struct {
 	save        game.SaveGame
 	client      llm.Client
 	memories    memory.Store
+	storage     storage.Store
 	allowedTags []string
 	recentTurns []llm.RecentTurn
 	rollFunc    func() int
@@ -33,8 +36,8 @@ type Session struct {
 
 const maxRecentNarratorTurns = 12
 
-func NewSession(save game.SaveGame, client llm.Client, memories memory.Store, allowedTags []string) *Session {
-	return &Session{save: save, client: client, memories: memories, allowedTags: append([]string{}, allowedTags...), rollFunc: defaultRoll}
+func NewSession(save game.SaveGame, client llm.Client, memories memory.Store, store storage.Store, allowedTags []string) *Session {
+	return &Session{save: save, client: client, memories: memories, storage: store, allowedTags: append([]string{}, allowedTags...), rollFunc: defaultRoll}
 }
 
 func defaultRoll() int {
@@ -136,6 +139,21 @@ func (s *Session) HandleTurn(ctx context.Context, input PlayerInput) (*game.Turn
 				warnings = append(warnings, fmt.Sprintf("memory persistence failed: %v", err))
 			}
 		}
+	}
+
+	if err := s.storage.SaveSnapshot(ctx, s.save); err != nil {
+		warnings = append(warnings, fmt.Sprintf("save persistence failed: %v", err))
+	}
+	if err := s.storage.AppendEvent(ctx, s.save.SaveID, storage.Event{
+		Turn:            s.save.CurrentTurn,
+		Type:            storage.EventTypeTurnResolved,
+		PlayerAction:    input.Text,
+		ResolvedEffects: changes,
+		Narration:       narration.Narration,
+		Warnings:        warnings,
+		CreatedAt:       time.Now().UTC(),
+	}); err != nil {
+		warnings = append(warnings, fmt.Sprintf("event log write failed: %v", err))
 	}
 
 	return &game.TurnResult{Narration: narration.Narration, StateChanges: changes, SuggestedActions: narration.SuggestedNextOptions, Warnings: warnings}, nil
