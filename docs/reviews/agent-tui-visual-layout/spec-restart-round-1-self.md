@@ -1,0 +1,6 @@
+- **severity: MAJOR**  
+  **location:** `docs/superpowers/specs/2026-08-04-agent-tui-visual-layout-design.md:66-70` versus sections “Compact layouts: 60x10 and boundary heights” (lines 84-88) and Acceptance Criteria 3/7 (lines 156-160)  
+  **evidence:** The restarted decision establishes a ten-row interactive minimum: 10–13 uses compact mode and 9 rows and below renders only the resize-required fallback. However, the earlier “Short Terminals and Long Drafts” rules still require compact-composer behavior at **8–13** rows and fallback only **below 8**. These are mutually exclusive requirements for 8 and 9 rows. The current implementation also has its fallback threshold at `<8` (`cmd/tu-tien-cli/tui.go:458-460`), so the conflict would directly leave the required replacement behavior and its tests ambiguous.  
+  **required change:** Replace the obsolete 8–13/below-8 rules with the ten-row policy everywhere normative behavior is defined: compact mode at 10–13, resize-required fallback only at 9 rows and below. Align the implementation sequence terminology and review-log wording if it is intended to describe the current design rather than historical rounds. State explicitly that the fallback renders no editor, footer controls, palette, or state-specific UI, matching the existing compact-layout section and acceptance tests.
+
+VERDICT: NEEDS_CHANGES

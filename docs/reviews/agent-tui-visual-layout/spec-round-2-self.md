@@ -1,0 +1,11 @@
+severity: MAJOR  
+location: `docs/superpowers/specs/2026-08-04-agent-tui-visual-layout-design.md:62-80`  
+evidence: The declared ranges are not covered by feasible budgets. At 14 rows, the stated normal narrow regions require at least 16 rows even with a one-row editor: outer frame (2) + header (2) + summary (2) + transcript label (1) + minimum viewport (3) + composer label (1) + suggestions (3) + editor (1) + footer (1). At 8–9 rows, the compact contract cannot accommodate the 10-row 60x10 budget while retaining its stated header, summary, viewport, separator, selected suggestion, notice/state line, editor/control, footer, and frame. This conflicts with the existing supported-height behavior in `cmd/tu-tien-cli/tui.go:458-470`, which falls back only below eight rows.  
+required change: Define deterministic degradation budgets for 14–17 and 8–9 rows, including which regions/controls are omitted or merged; alternatively raise the normal and compact thresholds so they match the defined 60x18 and 60x10 budgets. Add acceptance tests at the resulting boundary sizes.
+
+severity: MAJOR  
+location: `docs/superpowers/specs/2026-08-04-agent-tui-visual-layout-design.md:76-93, 134-143`  
+evidence: The row budgets reserve one row for notices/state lines, headers, palette controls, and footer help, but only suggestions and the narrow summary have an explicit horizontal ellipsis policy. The existing recovery notice is a long Vietnamese string (`cmd/tu-tien-cli/tui.go:28`) and is currently rendered directly (`cmd/tu-tien-cli/tui.go:613-617`); at 60 columns it can wrap into multiple rows. The same unbounded-row risk applies to scene/header text, palette item labels, pending status, locked message, and help/footer strings. Therefore the proposed fixed budgets and total-rendered-height tests cannot be implemented deterministically without a width/overflow contract for these controls.  
+required change: Specify a one-line overflow policy for every fixed-height non-viewport region at the target widths—e.g. width-aware ellipsis or approved compact replacement text—and state which full content, if any, must remain recoverable elsewhere. Add long UTF-8 scene, notice, palette, and footer/control cases to the layout tests, asserting no fixed region wraps beyond its assigned rows.
+
+VERDICT: NEEDS_CHANGES
