@@ -272,6 +272,28 @@ func TestTUINarrowLayoutKeepsActionAreaAndShowsHiddenHistoryIndicator(t *testing
 	}
 }
 
+func TestTUISaveCommandShowsTurnWithoutRawIDOrPath(t *testing.T) {
+	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
+	save.CurrentTurn = 7
+	session := &recordingSession{save: save}
+	model := newTUIModel(session, "test-model")
+
+	model, cmd := model.handleText(context.Background(), "/save")
+	if cmd != nil {
+		t.Fatal("cmd is not nil, /save should not call HandleTurn")
+	}
+	if len(session.inputs) != 0 {
+		t.Fatalf("inputs = %#v, want none", session.inputs)
+	}
+	view := model.View()
+	if !strings.Contains(view, "lượt 7") {
+		t.Fatalf("view missing turn confirmation:\n%s", view)
+	}
+	if strings.Contains(view, save.SaveID) {
+		t.Fatalf("view leaks raw save id %q:\n%s", save.SaveID, view)
+	}
+}
+
 type failingSession struct {
 	save game.SaveGame
 	err  error

@@ -32,6 +32,7 @@ const (
 	tempViewStatus
 	tempViewInventory
 	tempViewHelp
+	tempViewSave
 )
 
 // turnBlock is one resolved turn in the history region: player action,
@@ -231,6 +232,8 @@ func (m tuiModel) handleCommand(command string) (tuiModel, tea.Cmd) {
 		m.tempView = tempViewStatus
 	case "/inventory":
 		m.tempView = tempViewInventory
+	case "/save":
+		m.tempView = tempViewSave
 	case "/help":
 		m.tempView = tempViewHelp
 	case "/exit":
@@ -439,6 +442,7 @@ func renderCommandPalette() string {
 		"Lệnh:",
 		"  /status     Xem trạng thái nhân vật",
 		"  /inventory  Xem túi đồ",
+		"  /save       Xem tiến trình đã lưu",
 		"  /help       Xem hướng dẫn chơi",
 		"  /exit       Thoát game",
 	}, "\n")
@@ -450,6 +454,8 @@ func (m tuiModel) renderTempViewBody(save game.SaveGame) string {
 		return panelStyle.Render(formatStatus(save))
 	case tempViewInventory:
 		return panelStyle.Render(formatInventory(save))
+	case tempViewSave:
+		return panelStyle.Render(formatSaveConfirmation(save))
 	case tempViewHelp:
 		return panelStyle.Render(helpText(m.providerLabel))
 	default:
@@ -463,7 +469,8 @@ func helpText(providerLabel string) string {
 		"- Nhập hành động tự do, ví dụ: ta quan sát cổng môn.",
 		"- Nhập số để chọn một gợi ý đang hiển thị.",
 		"- Nhấn Tab để đưa gợi ý hiện tại vào ô nhập, có thể sửa trước khi gửi.",
-		"- Lệnh: /status, /inventory, /help, /exit.",
+		"- Lệnh: /status, /inventory, /save, /help, /exit.",
+		"- Tiến trình được lưu tự động sau mỗi lượt và tự tiếp tục ở lần chơi sau.",
 		"- Esc đóng màn hình đang xem hoặc thoát game.",
 	}
 	if strings.TrimSpace(providerLabel) != "" {
@@ -482,4 +489,12 @@ func formatInventory(save game.SaveGame) string {
 	var out bytes.Buffer
 	renderInventory(&out, save)
 	return strings.TrimSpace(out.String())
+}
+
+// formatSaveConfirmation deliberately omits the raw save id and filesystem
+// path: internal identifiers must not appear in player-facing UI. The id and
+// path remain available in debug.log for anyone who needs to locate the
+// file on disk.
+func formatSaveConfirmation(save game.SaveGame) string {
+	return fmt.Sprintf("Tiến trình đã được lưu tự động ở lượt %d.", save.CurrentTurn)
 }
