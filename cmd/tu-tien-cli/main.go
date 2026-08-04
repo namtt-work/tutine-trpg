@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/namtt/tutine-trpg/internal/config"
@@ -41,7 +40,7 @@ func main() {
 }
 
 func renderStatus(output interface{ Write([]byte) (int, error) }, save game.SaveGame) {
-	fmt.Fprintf(output, "%s - %s tầng %d | HP %d/%d | Linh lực %d/%d\n", save.Player.Name, save.Player.Realm, save.Player.Stage, save.Player.HP, save.Player.MaxHP, save.Player.SpiritualEnergy, save.Player.MaxEnergy)
+	fmt.Fprintf(output, "%s - %s tầng %d | HP %d/%d | Linh lực %d/%d\n", save.Player.Name, realmName(save.Player.Realm), save.Player.Stage, save.Player.HP, save.Player.MaxHP, save.Player.SpiritualEnergy, save.Player.MaxEnergy)
 }
 
 func renderInventory(output interface{ Write([]byte) (int, error) }, save game.SaveGame) {
@@ -64,14 +63,6 @@ func commandForSuggestedAction(action string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func resolveSuggestedAction(text string, options []string) (string, bool) {
-	choice, err := strconv.Atoi(text)
-	if err != nil || choice < 1 || choice > len(options) {
-		return "", false
-	}
-	return options[choice-1], true
 }
 
 func buildSession(ctx context.Context, configPath string, name string) (*orchestrator.Session, *log.Logger, func(), error) {
