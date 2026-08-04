@@ -4,7 +4,7 @@ Tài liệu này mô tả cách chạy và chơi bản CLI hiện tại của Tu
 
 ## Yêu Cầu
 
-- Go 1.24 trở lên.
+- Go 1.26.5 trở lên.
 - Terminal hỗ trợ UTF-8 để hiển thị tiếng Việt có dấu.
 - API key cho provider trong `configs/llm.yaml`. Mặc định là biến môi trường `GROQ_API_KEY`.
 

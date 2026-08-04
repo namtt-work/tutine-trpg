@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/namtt/tutine-trpg/internal/game"
 	"github.com/namtt/tutine-trpg/internal/orchestrator"
 )
@@ -32,8 +32,9 @@ func TestTUIFreeTextSubmitsTurn(t *testing.T) {
 	if got, want := session.inputs, []string{"ta quan sát cổng môn"}; !equalStrings(got, want) {
 		t.Fatalf("inputs = %#v, want %#v", got, want)
 	}
-	if !strings.Contains(model.View(), "Bạn đứng trước cổng môn.") || !strings.Contains(model.View(), "1. Quan sát xung quanh") {
-		t.Fatalf("view missing narration or suggestion:\n%s", model.View())
+	view := model.View().Content
+	if !strings.Contains(view, "Bạn đứng trước cổng môn.") || !strings.Contains(view, "1. Quan sát xung quanh") {
+		t.Fatalf("view missing narration or suggestion:\n%s", view)
 	}
 }
 
@@ -54,8 +55,8 @@ func TestTUINumberSelectsRoleplaySuggestion(t *testing.T) {
 	if got, want := session.inputs, []string{"Quan sát xung quanh"}; !equalStrings(got, want) {
 		t.Fatalf("inputs = %#v, want %#v", got, want)
 	}
-	if !strings.Contains(model.View(), "Bạn quan sát xung quanh.") {
-		t.Fatalf("view missing selected turn result:\n%s", model.View())
+	if view := model.View().Content; !strings.Contains(view, "Bạn quan sát xung quanh.") {
+		t.Fatalf("view missing selected turn result:\n%s", view)
 	}
 }
 
@@ -70,8 +71,8 @@ func TestTUIStatusCommandDoesNotSubmitTurn(t *testing.T) {
 	if len(session.inputs) != 0 {
 		t.Fatalf("inputs = %#v, want none", session.inputs)
 	}
-	if !strings.Contains(model.View(), "Nam - Luyện Khí tầng 1") {
-		t.Fatalf("view missing status:\n%s", model.View())
+	if view := model.View().Content; !strings.Contains(view, "Nam - Luyện Khí tầng 1") {
+		t.Fatalf("view missing status:\n%s", view)
 	}
 }
 
@@ -87,11 +88,12 @@ func TestTUITurnErrorIsRendered(t *testing.T) {
 	}
 	model, _ = model.applyTurnMsg(cmd().(turnFinishedMsg))
 
-	if strings.Contains(model.View(), "provider unavailable") {
-		t.Fatalf("view leaks raw internal error:\n%s", model.View())
+	view := model.View().Content
+	if strings.Contains(view, "provider unavailable") {
+		t.Fatalf("view leaks raw internal error:\n%s", view)
 	}
-	if !strings.Contains(model.View(), "Người kể chuyện gặp trục trặc") {
-		t.Fatalf("view missing friendly error message:\n%s", model.View())
+	if !strings.Contains(view, "Người kể chuyện gặp trục trặc") {
+		t.Fatalf("view missing friendly error message:\n%s", view)
 	}
 	if !strings.Contains(logBuf.String(), "provider unavailable") {
 		t.Fatalf("logger missing raw error detail: %q", logBuf.String())
@@ -105,7 +107,7 @@ func TestTUIInitialScreenShowsExampleAndUpToThreeSuggestions(t *testing.T) {
 	if len(model.suggestions) == 0 || len(model.suggestions) > 3 {
 		t.Fatalf("initial suggestions = %#v, want 1-3 scene-appropriate suggestions", model.suggestions)
 	}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Ví dụ: ta quan sát") {
 		t.Fatalf("view missing example action hint:\n%s", view)
 	}
@@ -126,8 +128,8 @@ func TestTUIInvalidNumericChoiceIsRejectedLocally(t *testing.T) {
 	if len(session.inputs) != 0 {
 		t.Fatalf("inputs = %#v, want none", session.inputs)
 	}
-	if !strings.Contains(model.View(), "Chọn từ 1 đến 2") {
-		t.Fatalf("view missing actionable range message:\n%s", model.View())
+	if view := model.View().Content; !strings.Contains(view, "Chọn từ 1 đến 2") {
+		t.Fatalf("view missing actionable range message:\n%s", view)
 	}
 }
 
@@ -161,13 +163,106 @@ func TestTUITempViewOpenCloseKeepsExistingDraft(t *testing.T) {
 		t.Fatalf("input = %q, want draft preserved while view is open", model.input)
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := model.Update(keyPress(tea.KeyEsc, ""))
 	model = updated.(tuiModel)
 	if model.tempView != tempViewNone {
 		t.Fatal("Esc should close the temporary view")
 	}
 	if model.input != "ta dang go do choi tiep" {
 		t.Fatalf("input = %q, want draft preserved after closing view", model.input)
+	}
+}
+
+func TestTUIKeyPressEscCancelsRecoverableDraft(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.recoverable = true
+	model.input = "ta hỏi đệ tử"
+	model.notice = turnFailureMessage
+
+	updated, cmd := model.Update(keyPress(tea.KeyEsc, ""))
+	model = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("Esc should cancel recovery before quitting")
+	}
+	if model.recoverable || model.input != "" || model.notice != "" {
+		t.Fatalf("recovery state = %#v, want cleared", model)
+	}
+}
+
+func TestTUIKeyPressEscClosesTemporaryViewBeforeRecoverableDraft(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.tempView = tempViewStatus
+	model.recoverable = true
+	model.input = "ta hỏi đệ tử"
+	model.notice = turnFailureMessage
+
+	updated, cmd := model.Update(keyPress(tea.KeyEsc, ""))
+	model = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("Esc should close the temporary view before cancelling recovery")
+	}
+	if model.tempView != tempViewNone {
+		t.Fatal("Esc should close the temporary view")
+	}
+	if !model.recoverable || model.input != "ta hỏi đệ tử" || model.notice != turnFailureMessage {
+		t.Fatalf("recovery state = %#v, want preserved after closing temporary view", model)
+	}
+}
+
+func TestTUIKeyPressEscQuitsWhenNoLayerIsOpen(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+
+	_, cmd := model.Update(keyPress(tea.KeyEsc, ""))
+	assertQuitCommand(t, cmd)
+}
+
+func TestTUIKeyPressCtrlCQuits(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+
+	_, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
+	assertQuitCommand(t, cmd)
+}
+
+func TestTUIKeyPressTabReplacesDraftWithSuggestion(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.suggestions = []string{"Quan sát cổng môn", "Hỏi đệ tử"}
+	model.input = "bản nháp"
+
+	updated, cmd := model.Update(keyPress(tea.KeyTab, ""))
+	model = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("Tab should update the selected suggestion locally")
+	}
+	if model.selected != 0 || model.input != "Quan sát cổng môn" {
+		t.Fatalf("selected/input = %d/%q, want 0/first suggestion", model.selected, model.input)
+	}
+}
+
+func TestTUIKeyPressBackspaceRemovesOneVietnameseRune(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.input = "đạo"
+	model.notice = "chọn lại"
+
+	updated, cmd := model.Update(keyPress(tea.KeyBackspace, ""))
+	model = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("Backspace should update the draft locally")
+	}
+	if model.input != "đạ" || model.notice != "" {
+		t.Fatalf("input/notice = %q/%q, want Vietnamese rune removed and notice cleared", model.input, model.notice)
+	}
+}
+
+func TestTUIKeyPressAppendsVietnameseText(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+
+	updated, cmd := model.Update(keyPress('đ', "đ"))
+	model = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("printable text should update the draft locally")
+	}
+	if model.input != "đ" {
+		t.Fatalf("input = %q, want Vietnamese text appended once", model.input)
 	}
 }
 
@@ -178,11 +273,11 @@ func TestTUIPendingTurnBlocksDuplicateSubmission(t *testing.T) {
 	}
 	model := newTUIModel(session, "test-model")
 	for _, r := range "ta cho" {
-		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, _ := model.Update(keyPress(r, string(r)))
 		model = updated.(tuiModel)
 	}
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(keyPress(tea.KeyEnter, ""))
 	model = updated.(tuiModel)
 	if cmd == nil {
 		t.Fatal("cmd is nil, want async command for first submission")
@@ -190,9 +285,9 @@ func TestTUIPendingTurnBlocksDuplicateSubmission(t *testing.T) {
 	if model.pending == nil {
 		t.Fatal("expected pending turn to be set")
 	}
-	viewBeforeDuplicate := model.View()
+	viewBeforeDuplicate := model.View().Content
 
-	updated2, cmd2 := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated2, cmd2 := model.Update(keyPress(tea.KeyEnter, ""))
 	model2 := updated2.(tuiModel)
 	if cmd2 != nil {
 		t.Fatal("duplicate Enter should not trigger a second async command")
@@ -200,8 +295,8 @@ func TestTUIPendingTurnBlocksDuplicateSubmission(t *testing.T) {
 	if len(session.inputs) != 0 {
 		t.Fatalf("HandleTurn ran before the pending command executed, inputs = %#v", session.inputs)
 	}
-	if model2.View() != viewBeforeDuplicate {
-		t.Fatalf("duplicate submission attempt changed the rendered view:\nbefore:\n%s\nafter:\n%s", viewBeforeDuplicate, model2.View())
+	if model2.View().Content != viewBeforeDuplicate {
+		t.Fatalf("duplicate submission attempt changed the rendered view:\nbefore:\n%s\nafter:\n%s", viewBeforeDuplicate, model2.View().Content)
 	}
 }
 
@@ -234,6 +329,18 @@ func TestTUIFailedTurnRestoresInputAndAllowsRetry(t *testing.T) {
 	}
 }
 
+func TestTUIViewUsesAlternateScreen(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+
+	view := model.View()
+	if view.Content == "" {
+		t.Fatal("view content must not be empty")
+	}
+	if !view.AltScreen {
+		t.Fatal("view must request alternate screen")
+	}
+}
+
 func TestTUIDoesNotRenderRawIDs(t *testing.T) {
 	rawIDs := []string{"loc_outer_gate", "qi_refining"}
 
@@ -241,7 +348,7 @@ func TestTUIDoesNotRenderRawIDs(t *testing.T) {
 	statusModel := defaultModel
 	statusModel.tempView = tempViewStatus
 
-	for _, view := range []string{defaultModel.View(), statusModel.View()} {
+	for _, view := range []string{defaultModel.View().Content, statusModel.View().Content} {
 		for _, raw := range rawIDs {
 			if strings.Contains(view, raw) {
 				t.Fatalf("view leaks raw internal id %q:\n%s", raw, view)
@@ -263,7 +370,7 @@ func TestTUINarrowLayoutKeepsActionAreaAndShowsHiddenHistoryIndicator(t *testing
 		})
 	}
 
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Enter gửi") {
 		t.Fatalf("action area missing from narrow view:\n%s", view)
 	}
@@ -285,12 +392,26 @@ func TestTUISaveCommandShowsTurnWithoutRawIDOrPath(t *testing.T) {
 	if len(session.inputs) != 0 {
 		t.Fatalf("inputs = %#v, want none", session.inputs)
 	}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "lượt 7") {
 		t.Fatalf("view missing turn confirmation:\n%s", view)
 	}
 	if strings.Contains(view, save.SaveID) {
 		t.Fatalf("view leaks raw save id %q:\n%s", save.SaveID, view)
+	}
+}
+
+func keyPress(code rune, text string) tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: code, Text: text})
+}
+
+func assertQuitCommand(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("cmd is nil, want quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("command message = %T, want tea.QuitMsg", cmd())
 	}
 }
 

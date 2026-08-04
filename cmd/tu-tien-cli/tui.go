@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/namtt/tutine-trpg/internal/game"
 	"github.com/namtt/tutine-trpg/internal/orchestrator"
 )
@@ -104,7 +104,7 @@ func runTUI(ctx context.Context, session orchestrator.GameSession, providerLabel
 	model := newTUIModel(session, providerLabel)
 	model.ctx = ctx
 	model.logger = logger
-	_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
+	_, err := tea.NewProgram(model).Run()
 	return err
 }
 
@@ -118,7 +118,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case turnFinishedMsg:
 		return m.applyTurnMsg(msg)
@@ -127,31 +127,32 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m tuiModel) handleKey(msg tea.KeyMsg) (tuiModel, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyCtrlC:
+func (m tuiModel) handleKey(msg tea.KeyPressMsg) (tuiModel, tea.Cmd) {
+	key := msg.Key()
+	switch {
+	case key.Code == 'c' && key.Mod&tea.ModCtrl != 0:
 		return m, tea.Quit
-	case tea.KeyEsc:
+	case key.Code == tea.KeyEsc:
 		return m.handleEsc()
-	case tea.KeyEnter:
+	case key.Code == tea.KeyEnter:
 		if m.pending != nil {
 			return m, nil
 		}
 		text := m.input
 		m.input = ""
 		return m.handleText(m.ctx, text)
-	case tea.KeyTab:
+	case key.Code == tea.KeyTab:
 		return m.handleTab(), nil
-	case tea.KeyBackspace:
+	case key.Code == tea.KeyBackspace:
 		if len(m.input) > 0 {
 			runes := []rune(m.input)
 			m.input = string(runes[:len(runes)-1])
 		}
 		m.notice = ""
 		return m, nil
-	case tea.KeyRunes:
+	case key.Text != "":
 		if m.pending == nil {
-			m.input += string(msg.Runes)
+			m.input += key.Text
 			m.notice = ""
 		}
 		return m, nil
@@ -274,13 +275,13 @@ func (m tuiModel) applyTurnMsg(msg turnFinishedMsg) (tuiModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m tuiModel) View() string {
+func (m tuiModel) View() tea.View {
 	save := m.session.Save()
 	header := renderHeader(save)
 	action := m.renderActionArea()
 
 	if m.tempView != tempViewNone {
-		return strings.Join([]string{header, m.renderTempViewBody(save), action}, "\n\n")
+		return tea.View{Content: strings.Join([]string{header, m.renderTempViewBody(save), action}, "\n\n"), AltScreen: true}
 	}
 
 	history := clipHistory(m.historyText(save), m.historyBudget())
@@ -295,9 +296,9 @@ func (m tuiModel) View() string {
 		mainWidth := max(m.width-rightWidth-2, 40)
 		left := lipgloss.NewStyle().Width(mainWidth).Render(history)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, left, summary)
-		return strings.Join([]string{header, body, action}, "\n\n")
+		return tea.View{Content: strings.Join([]string{header, body, action}, "\n\n"), AltScreen: true}
 	}
-	return strings.Join([]string{header, summary, history, action}, "\n\n")
+	return tea.View{Content: strings.Join([]string{header, summary, history, action}, "\n\n"), AltScreen: true}
 }
 
 func renderHeader(save game.SaveGame) string {
