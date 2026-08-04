@@ -1,0 +1,6 @@
+- **severity: MAJOR**  
+  **location:** `docs/superpowers/specs/2026-08-04-agent-tui-enhancement-bubbles-v2-design.md:122-129, 168-184, 204-215`  
+  **evidence:** The ambiguous-completion contract says to tell the player to restart/reopen “before acting again” and prohibits retry, but it does not define a distinct locked/terminal UI state. Once `pending` is cleared, the listed modes and footer fall back to regular behavior; under the existing model this would leave an empty, editable input able to submit another `HandleTurn`. The stated test only checks that the draft is not restored and no retry is offered, not that subsequent input/submission is blocked. This defeats the safety rationale: a `nil, nil` result may have applied state at an unknown point, so a subsequent action in the same session is also unsafe.  
+  **required change:** Define an explicit ambiguous-completion mode that disables textarea editing and all game-turn submission (and defines which, if any, non-game controls remain available, such as `/exit`), supplies contextual help, and is exited only by reopening/restarting the session. Add fake-session coverage proving post-ambiguity key input/Enter cannot call `HandleTurn`, pending/spinner are cleared, and no resolved turn is rendered.
+
+VERDICT: NEEDS_CHANGES

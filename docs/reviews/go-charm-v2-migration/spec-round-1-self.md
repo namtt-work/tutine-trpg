@@ -1,0 +1,6 @@
+- **severity:** MAJOR  
+  **location:** `docs/superpowers/specs/2026-08-04-go-charm-v2-migration-design.md:59-66, 77-88, 98-107`  
+  **evidence:** The spec makes preservation of Ctrl+C, Esc recovery/cancel/quit, Tab suggestion selection, Backspace editing, and printable Unicode input explicit migration requirements. However, its test strategy only generally says to retain coverage and construct `tea.KeyPressMsg` events. The current test suite has coverage for Esc closing a temporary view and for rune/Enter pending submission, but no tests exercise Ctrl+C quit, Tab selection/replacement, Backspace—particularly rune-safe deletion—or Esc cancellation of a recoverable failed draft. Migration from `KeyMsg`/`KeyRunes` to `KeyPressMsg` is precisely where these key translations can silently regress.  
+  **required change:** Add a concrete acceptance-test matrix for every preserved keyboard behavior, requiring v2 `tea.KeyPressMsg` tests for Ctrl+C, contextual Esc precedence (temporary view, recoverable draft, quit), Tab suggestion insertion, Backspace deletion of Vietnamese/multibyte input, Enter submission, and printable Vietnamese text. Require assertions on resulting model state and commands, not only rendered substrings.
+
+VERDICT: NEEDS_CHANGES
