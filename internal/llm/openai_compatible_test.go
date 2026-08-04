@@ -446,3 +446,40 @@ func equalDialogueLines(left []DialogueLine, right []DialogueLine) bool {
 	}
 	return true
 }
+
+func TestOpenAICompatibleClientRejectsOversizedResponse(t *testing.T) {
+	t.Setenv("TEST_LLM_KEY", "secret-test-key")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(make([]byte, maxResponseBytes+1024))
+	}))
+	defer server.Close()
+
+	client := newTestOpenAIClient(t, server.URL)
+	_, err := client.PlanRetrieval(context.Background(), PlannerRequest{PlayerAction: "ta quan sat"})
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("err = %v, want bounded-size error", err)
+	}
+}
+
+func TestOpenAICompatibleClientTruncatesProviderErrorBody(t *testing.T) {
+	t.Setenv("TEST_LLM_KEY", "secret-test-key")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(make([]byte, maxErrorBodyBytes+1024)) // over the 4 KiB error-body cap, under the 8 MiB size guard
+	}))
+	defer server.Close()
+
+	client := newTestOpenAIClient(t, server.URL)
+	client.maxRetries = 0
+	_, err := client.PlanRetrieval(context.Background(), PlannerRequest{PlayerAction: "ta quan sat"})
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	if len(err.Error()) > maxErrorBodyBytes*2 {
+		t.Fatalf("error message length = %d, want bounded body in error", len(err.Error()))
+	}
+	if !strings.Contains(err.Error(), "…") {
+		t.Fatalf("error message %q, want truncation marker", err.Error())
+	}
+}

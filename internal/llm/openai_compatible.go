@@ -213,6 +213,14 @@ func (c *OpenAICompatibleClient) chatNarratorYAML(ctx context.Context, userPromp
 // (or a broken executor) can't loop forever burning tokens.
 const maxToolCallRounds = 6
 
+// maxResponseBytes caps a single provider response body so a compromised or
+// misconfigured endpoint cannot exhaust process memory. maxErrorBodyBytes
+// caps how much of a non-2xx body is retained in providerStatusError.
+const (
+	maxResponseBytes  = 8 << 20 // 8 MiB
+	maxErrorBodyBytes = 4 << 10 // 4 KiB
+)
+
 // runChat sends the chat request and hands each final (non-tool-call)
 // response to decode. Transient provider errors (rate limit, 5xx) are
 // retried unchanged. A decode failure is retried too: the malformed reply
@@ -297,12 +305,19 @@ func (c *OpenAICompatibleClient) sendChatMessage(ctx context.Context, body []byt
 	}
 	defer resp.Body.Close()
 
-	data, readErr := io.ReadAll(resp.Body)
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if readErr != nil {
 		return chatMessage{}, readErr
 	}
+	if len(data) > maxResponseBytes {
+		return chatMessage{}, fmt.Errorf("llm provider response exceeds %d bytes", maxResponseBytes)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return chatMessage{}, providerStatusError{statusCode: resp.StatusCode, body: strings.TrimSpace(string(data))}
+		body := strings.TrimSpace(string(data))
+		if len(body) > maxErrorBodyBytes {
+			body = body[:maxErrorBodyBytes] + "…"
+		}
+		return chatMessage{}, providerStatusError{statusCode: resp.StatusCode, body: body}
 	}
 
 	var parsed chatResponse
