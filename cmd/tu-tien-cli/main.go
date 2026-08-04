@@ -29,6 +29,13 @@ type StartupOptions struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	name := flag.String("name", "Vô Danh", "player name for a new game")
 	configPath := flag.String("config", "configs/llm.yaml", "runtime config path")
 	saveID := flag.String("save", "", "resume a specific save, skipping auto-resume")
@@ -38,20 +45,15 @@ func main() {
 	opts := StartupOptions{PlayerName: *name, SaveID: *saveID, ForceNew: *forceNew}
 	session, logger, cleanup, err := buildSession(context.Background(), *configPath, opts)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	defer cleanup()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
-	if err := runTUI(context.Background(), session, cfg.LLM.Model, logger); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return runTUI(context.Background(), session, cfg.LLM.Model, logger)
 }
 
 func renderStatus(output interface{ Write([]byte) (int, error) }, save game.SaveGame) {
