@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,14 +15,28 @@ import (
 	"github.com/namtt/tutine-trpg/internal/llm"
 	"github.com/namtt/tutine-trpg/internal/memory"
 	"github.com/namtt/tutine-trpg/internal/orchestrator"
+	"github.com/namtt/tutine-trpg/internal/storage"
 )
 
+const defaultCampaignID = "thanh-van-sect"
+
+// StartupOptions selects which save buildSession uses. SaveID and ForceNew
+// are mutually exclusive; see resolveStartupSave for the resolution order.
+type StartupOptions struct {
+	PlayerName string
+	SaveID     string
+	ForceNew   bool
+}
+
 func main() {
-	name := flag.String("name", "Vô Danh", "player name")
+	name := flag.String("name", "Vô Danh", "player name for a new game")
 	configPath := flag.String("config", "configs/llm.yaml", "runtime config path")
+	saveID := flag.String("save", "", "resume a specific save, skipping auto-resume")
+	forceNew := flag.Bool("new", false, "force a new game even if a save exists")
 	flag.Parse()
 
-	session, logger, cleanup, err := buildSession(context.Background(), *configPath, *name)
+	opts := StartupOptions{PlayerName: *name, SaveID: *saveID, ForceNew: *forceNew}
+	session, logger, cleanup, err := buildSession(context.Background(), *configPath, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -65,7 +80,11 @@ func commandForSuggestedAction(action string) (string, bool) {
 	}
 }
 
-func buildSession(ctx context.Context, configPath string, name string) (*orchestrator.Session, *log.Logger, func(), error) {
+func buildSession(ctx context.Context, configPath string, opts StartupOptions) (*orchestrator.Session, *log.Logger, func(), error) {
+	if opts.SaveID != "" && opts.ForceNew {
+		return nil, nil, nil, errors.New("--save and --new cannot be used together")
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("load config %s: %w", configPath, err)
@@ -87,21 +106,84 @@ func buildSession(ctx context.Context, configPath string, name string) (*orchest
 	}
 	logger := log.New(logFile, "", log.LstdFlags)
 
-	save := game.NewStarterSave(game.NewGameRequest{Name: name, CampaignID: "thanh-van-sect", Traits: []string{"careful"}})
-	saveDir := filepath.Join(dataDir, "saves", save.SaveID)
-	if err := os.MkdirAll(saveDir, 0o755); err != nil {
-		_ = logFile.Close()
-		return nil, nil, nil, err
-	}
-	store, err := memory.NewSQLiteStore(ctx, filepath.Join(saveDir, "game.db"))
+	fileStore := storage.NewFileStore(dataDir)
+	save, lock, resumeKind, err := resolveStartupSave(ctx, fileStore, opts)
 	if err != nil {
 		_ = logFile.Close()
 		return nil, nil, nil, err
 	}
-	session := orchestrator.NewSession(save, client, store, []string{"trust", "secret", "sect_politics"})
+
+	// save.SaveID is safe to use for the game.db path here: resolveStartupSave
+	// only returns via LoadSnapshot (which cross-checks the embedded SaveID
+	// against the requested one) or a just-created SaveGame, so it is always
+	// the canonical ID for this save, not a value blindly trusted from JSON.
+	saveDir := filepath.Join(dataDir, "saves", save.SaveID)
+	memStore, err := memory.NewSQLiteStore(ctx, filepath.Join(saveDir, "game.db"))
+	if err != nil {
+		_ = lock.Release()
+		_ = logFile.Close()
+		return nil, nil, nil, err
+	}
+
+	logger.Printf("%s save %s at turn %d", resumeKind, save.SaveID, save.CurrentTurn)
+
+	session := orchestrator.NewSession(save, client, memStore, fileStore, []string{"trust", "secret", "sect_politics"})
 	cleanup := func() {
-		_ = store.Close()
+		_ = lock.Release()
+		_ = memStore.Close()
 		_ = logFile.Close()
 	}
 	return session, logger, cleanup, nil
+}
+
+// resolveStartupSave implements the StartupOptions resolution order: explicit
+// SaveID, else ForceNew, else auto-resume the most recently updated save for
+// the campaign, else start a new one. It acquires the save's lock before
+// returning and, for a brand new save, writes the initial snapshot so the
+// save exists on disk even if the player quits before their first resolved
+// turn. Any error after the lock is acquired releases it before returning.
+func resolveStartupSave(ctx context.Context, store storage.Store, opts StartupOptions) (game.SaveGame, storage.Lock, string, error) {
+	if opts.SaveID != "" {
+		lock, err := store.AcquireLock(ctx, opts.SaveID)
+		if err != nil {
+			return game.SaveGame{}, nil, "", err
+		}
+		save, err := store.LoadSnapshot(ctx, opts.SaveID)
+		if err != nil {
+			_ = lock.Release()
+			return game.SaveGame{}, nil, "", err
+		}
+		return save, lock, "resumed", nil
+	}
+
+	if !opts.ForceNew {
+		saves, err := store.ListSaves(ctx, defaultCampaignID)
+		if err != nil {
+			return game.SaveGame{}, nil, "", err
+		}
+		if len(saves) > 0 {
+			latestID := saves[0].SaveID
+			lock, err := store.AcquireLock(ctx, latestID)
+			if err != nil {
+				return game.SaveGame{}, nil, "", err
+			}
+			save, err := store.LoadSnapshot(ctx, latestID)
+			if err != nil {
+				_ = lock.Release()
+				return game.SaveGame{}, nil, "", err
+			}
+			return save, lock, "resumed", nil
+		}
+	}
+
+	save := game.NewStarterSave(game.NewGameRequest{Name: opts.PlayerName, CampaignID: defaultCampaignID, Traits: []string{"careful"}})
+	lock, err := store.AcquireLock(ctx, save.SaveID)
+	if err != nil {
+		return game.SaveGame{}, nil, "", err
+	}
+	if err := store.SaveSnapshot(ctx, save); err != nil {
+		_ = lock.Release()
+		return game.SaveGame{}, nil, "", fmt.Errorf("write initial save snapshot: %w", err)
+	}
+	return save, lock, "started new", nil
 }
