@@ -13,6 +13,40 @@ type Client interface {
 	ExtractMemories(ctx context.Context, req ExtractorRequest) ([]MemoryDraft, error)
 }
 
+// ToolDefinition describes one engine-backed action the narrator model may
+// call mid-turn (e.g. rolling a probability check) before it writes
+// narration, instead of inventing an uncertain outcome itself.
+type ToolDefinition struct {
+	Name        string
+	Description string
+	// Parameters is a JSON Schema object describing the call's arguments.
+	Parameters json.RawMessage
+}
+
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments json.RawMessage
+}
+
+type ToolResult struct {
+	ToolCallID string
+	Content    string
+}
+
+// ToolExecutor runs one tool call against the authoritative game engine and
+// returns its result. The LLM never mutates state directly: exec is owned by
+// the orchestrator, which is the only layer allowed to touch game.SaveGame.
+type ToolExecutor func(ctx context.Context, call ToolCall) (ToolResult, error)
+
+// ToolCapableClient is implemented by providers that support iterative
+// function/tool calling. Session prefers this over plain Narrate when the
+// configured client supports it; providers that don't implement it (like
+// FakeClient) fall back to the single-shot structured-output flow.
+type ToolCapableClient interface {
+	NarrateWithTools(ctx context.Context, req NarratorRequest, tools []ToolDefinition, exec ToolExecutor) (NarratorResponse, error)
+}
+
 type PlannerRequest struct {
 	PlayerAction string
 	SceneID      string

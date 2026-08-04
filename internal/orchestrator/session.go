@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 
 	"github.com/namtt/tutine-trpg/internal/game"
@@ -26,12 +28,69 @@ type Session struct {
 	memories    memory.Store
 	allowedTags []string
 	recentTurns []llm.RecentTurn
+	rollFunc    func() int
 }
 
 const maxRecentNarratorTurns = 12
 
 func NewSession(save game.SaveGame, client llm.Client, memories memory.Store, allowedTags []string) *Session {
-	return &Session{save: save, client: client, memories: memories, allowedTags: append([]string{}, allowedTags...)}
+	return &Session{save: save, client: client, memories: memories, allowedTags: append([]string{}, allowedTags...), rollFunc: defaultRoll}
+}
+
+func defaultRoll() int {
+	return rand.Intn(100) + 1
+}
+
+// narratorTools are the engine-backed actions the narrator model may call
+// mid-turn via a ToolCapableClient, before it writes narration.
+var narratorTools = []llm.ToolDefinition{
+	{
+		Name:        "roll_check",
+		Description: "Yêu cầu engine thực hiện một lần kiểm tra xác suất dựa trên chỉ số nhân vật trước khi mô tả một hành động có kết quả không chắc chắn.",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"stat": {"type": "string", "enum": ["attack", "defense", "speed", "comprehension", "luck"]},
+				"difficulty": {"type": "integer", "minimum": 0, "maximum": 20}
+			},
+			"required": ["stat", "difficulty"]
+		}`),
+	},
+}
+
+// narrate calls Narrate through the tool-calling loop when the configured
+// client supports it (ToolCapableClient), so the model can call roll_check
+// and see its result before writing narration. Clients without tool support
+// (e.g. FakeClient) fall back to the plain single-shot call.
+func (s *Session) narrate(ctx context.Context, req llm.NarratorRequest) (llm.NarratorResponse, error) {
+	if toolClient, ok := s.client.(llm.ToolCapableClient); ok {
+		return toolClient.NarrateWithTools(ctx, req, narratorTools, s.executeTool)
+	}
+	return s.client.Narrate(ctx, req)
+}
+
+func (s *Session) executeTool(_ context.Context, call llm.ToolCall) (llm.ToolResult, error) {
+	switch call.Name {
+	case "roll_check":
+		var args struct {
+			Stat       string `json:"stat"`
+			Difficulty int    `json:"difficulty"`
+		}
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return llm.ToolResult{}, fmt.Errorf("invalid roll_check arguments: %w", err)
+		}
+		result, err := game.ResolveCheck(s.save, game.CheckRequest{Stat: args.Stat, Difficulty: args.Difficulty}, s.rollFunc())
+		if err != nil {
+			return llm.ToolResult{}, err
+		}
+		payload, err := json.Marshal(result)
+		if err != nil {
+			return llm.ToolResult{}, err
+		}
+		return llm.ToolResult{ToolCallID: call.ID, Content: string(payload)}, nil
+	default:
+		return llm.ToolResult{}, fmt.Errorf("unknown tool %q", call.Name)
+	}
 }
 
 func (s *Session) Save() game.SaveGame {
@@ -58,7 +117,7 @@ func (s *Session) HandleTurn(ctx context.Context, input PlayerInput) (*game.Turn
 		contextLines = append(contextLines, hit.Memory.Summary)
 	}
 
-	narration, err := s.client.Narrate(ctx, llm.NarratorRequest{PlayerAction: input.Text, SceneID: s.save.CurrentScene, AuthoritativeState: narratorState(s.save), RecentTurns: copyRecentTurns(s.recentTurns), RetrievedContext: contextLines, AllowedEffects: []string{game.EffectEnergyDelta, game.EffectRelationshipDelta, game.EffectGrantItem}})
+	narration, err := s.narrate(ctx, llm.NarratorRequest{PlayerAction: input.Text, SceneID: s.save.CurrentScene, AuthoritativeState: narratorState(s.save), RecentTurns: copyRecentTurns(s.recentTurns), RetrievedContext: contextLines, AllowedEffects: []string{game.EffectEnergyDelta, game.EffectRelationshipDelta, game.EffectGrantItem}})
 	if err != nil {
 		return nil, err
 	}

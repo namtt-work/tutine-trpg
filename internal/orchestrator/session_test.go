@@ -2,9 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/namtt/tutine-trpg/internal/game"
@@ -55,6 +58,27 @@ func (c *continuityClient) Narrate(_ context.Context, req llm.NarratorRequest) (
 		return llm.NarratorResponse{Narration: "Người gác cổng yêu cầu lệnh bài.", ProposedEffects: []game.Effect{{Type: game.EffectEnergyDelta, TargetID: "player", Amount: -1}}}, nil
 	}
 	return llm.NarratorResponse{Narration: "Người gác cổng chờ bạn trả lời."}, nil
+}
+
+// toolLoopClient is a ToolCapableClient test double: it exercises the tool
+// call the same way a real provider's model would (call roll_check, read
+// the engine's result, then narrate) so we can assert the loop is actually
+// wired through Session, not just present in the llm package.
+type toolLoopClient struct {
+	llm.FakeClient
+	calls []llm.ToolCall
+}
+
+func (c *toolLoopClient) NarrateWithTools(ctx context.Context, req llm.NarratorRequest, tools []llm.ToolDefinition, exec llm.ToolExecutor) (llm.NarratorResponse, error) {
+	if len(tools) != 1 || tools[0].Name != "roll_check" {
+		return llm.NarratorResponse{}, fmt.Errorf("unexpected tools = %#v", tools)
+	}
+	result, err := exec(ctx, llm.ToolCall{ID: "call_1", Name: "roll_check", Arguments: json.RawMessage(`{"stat":"comprehension","difficulty":5}`)})
+	if err != nil {
+		return llm.NarratorResponse{}, err
+	}
+	c.calls = append(c.calls, llm.ToolCall{Name: "roll_check", Arguments: json.RawMessage(result.Content)})
+	return llm.NarratorResponse{Narration: fmt.Sprintf("Kết quả dò xét: %s", result.Content)}, nil
 }
 
 type recordingStore struct {
@@ -166,6 +190,52 @@ func TestHandleTurnRejectsInvalidLLMEffectsWithoutFailingTurn(t *testing.T) {
 	}
 	if len(result.Warnings) != 2 {
 		t.Fatalf("warnings = %#v, want two rejected effect warnings", result.Warnings)
+	}
+}
+
+func TestHandleTurnUsesToolCapableClientRollCheck(t *testing.T) {
+	client := &toolLoopClient{}
+	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
+	session := NewSession(save, client, &recordingStore{}, nil)
+	session.rollFunc = func() int { return 10 }
+
+	result, err := session.HandleTurn(context.Background(), PlayerInput{Text: "ta dò xét chấp sự"})
+	if err != nil {
+		t.Fatalf("HandleTurn returned error: %v", err)
+	}
+	if len(client.calls) != 1 || client.calls[0].Name != "roll_check" {
+		t.Fatalf("calls = %#v, want one roll_check call", client.calls)
+	}
+	if !strings.Contains(result.Narration, `"success":true`) {
+		t.Fatalf("narration = %q, want it to embed the engine's check result", result.Narration)
+	}
+
+	var payload game.CheckResult
+	if err := json.Unmarshal(client.calls[0].Arguments, &payload); err != nil {
+		t.Fatalf("decode roll_check result: %v", err)
+	}
+	if payload.Roll != 10 || !payload.Success {
+		t.Fatalf("engine check result = %#v, want roll=10 success=true (comprehension 5, difficulty 5 -> threshold 50)", payload)
+	}
+}
+
+func TestExecuteToolRejectsUnknownStat(t *testing.T) {
+	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam"})
+	session := NewSession(save, llm.FakeClient{}, nil, nil)
+
+	_, err := session.executeTool(context.Background(), llm.ToolCall{ID: "call_1", Name: "roll_check", Arguments: json.RawMessage(`{"stat":"charisma","difficulty":5}`)})
+	if err == nil {
+		t.Fatal("expected error for unknown stat")
+	}
+}
+
+func TestExecuteToolRejectsUnknownToolName(t *testing.T) {
+	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam"})
+	session := NewSession(save, llm.FakeClient{}, nil, nil)
+
+	_, err := session.executeTool(context.Background(), llm.ToolCall{ID: "call_1", Name: "teleport", Arguments: json.RawMessage(`{}`)})
+	if err == nil {
+		t.Fatal("expected error for unknown tool")
 	}
 }
 
