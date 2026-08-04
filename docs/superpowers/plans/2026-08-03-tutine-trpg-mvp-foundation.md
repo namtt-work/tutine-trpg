@@ -42,16 +42,18 @@
 ### Task 1: Go Module And Core Game State
 
 **Files:**
+
 - Create: `go.mod`
 - Create: `internal/game/state.go`
 - Create: `internal/game/effects.go`
 - Test: `internal/game/effects_test.go`
 
 **Interfaces:**
+
 - Produces: `game.SaveGame`, `game.Player`, `game.Stats`, `game.Effect`, `game.ApplyEffects(save *SaveGame, effects []Effect) ([]StateChangeView, error)`, `game.NewStarterSave(req NewGameRequest) SaveGame`.
 - Consumes: No project code from earlier tasks.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/game/effects_test.go`:
 
@@ -88,13 +90,13 @@ func TestApplyEffectsClampsRelationshipDelta(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `go test ./internal/game`
 
 Expected: FAIL because `go.mod` and `internal/game` do not exist.
 
-- [ ] **Step 3: Create Go module**
+- [x] **Step 3: Create Go module**
 
 Create `go.mod`:
 
@@ -104,7 +106,7 @@ module github.com/namtt/tutine-trpg
 go 1.22
 ```
 
-- [ ] **Step 4: Implement core state and effect validation**
+- [x] **Step 4: Implement core state and effect validation**
 
 Create `internal/game/state.go`:
 
@@ -283,7 +285,7 @@ func clamp(v, min, max int) int {
 }
 ```
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `gofmt -w internal/game/*.go && go test ./internal/game`
 
@@ -301,6 +303,7 @@ git commit -m "feat: add core game state and effects"
 ### Task 2: Campaign And Runtime Config Loading
 
 **Files:**
+
 - Create: `internal/config/config.go`
 - Create: `internal/config/config_test.go`
 - Create: `internal/campaign/campaign.go`
@@ -310,10 +313,11 @@ git commit -m "feat: add core game state and effects"
 - Create: `campaigns/thanh-van-sect/tags.yaml`
 
 **Interfaces:**
+
 - Consumes: No runtime dependency on Task 1.
 - Produces: `config.Load(path string) (Config, error)`, `campaign.Load(dir string) (Campaign, error)`, and campaign tag vocabulary for LLM validation.
 
-- [ ] **Step 1: Write failing config tests**
+- [x] **Step 1: Write failing config tests**
 
 Create `internal/config/config_test.go`:
 
@@ -365,19 +369,19 @@ func TestLoadCampaign(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `go test ./internal/config ./internal/campaign`
 
 Expected: FAIL because packages do not exist.
 
-- [ ] **Step 3: Add YAML dependency**
+- [x] **Step 3: Add YAML dependency**
 
 Run: `go get gopkg.in/yaml.v3`
 
 Expected: `go.mod` and `go.sum` include `gopkg.in/yaml.v3`.
 
-- [ ] **Step 4: Implement config loader**
+- [x] **Step 4: Implement config loader**
 
 Create `internal/config/config.go`:
 
@@ -426,7 +430,7 @@ func Load(path string) (Config, error) {
 }
 ```
 
-- [ ] **Step 5: Implement campaign loader and seed data**
+- [x] **Step 5: Implement campaign loader and seed data**
 
 Create `internal/campaign/campaign.go`:
 
@@ -528,7 +532,7 @@ debug:
   log_retrieval: true
 ```
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `gofmt -w internal/config/*.go internal/campaign/*.go && go test ./internal/config ./internal/campaign`
 
@@ -546,15 +550,17 @@ git commit -m "feat: add config and campaign loading"
 ### Task 3: SQLite FTS Memory Store
 
 **Files:**
+
 - Create: `internal/memory/memory.go`
 - Create: `internal/memory/sqlite_store.go`
 - Test: `internal/memory/sqlite_store_test.go`
 
 **Interfaces:**
+
 - Produces: `memory.Store`, `memory.Memory`, `memory.Query`, `memory.Hit`, `memory.NewSQLiteStore(ctx context.Context, path string) (*SQLiteStore, error)`.
 - Consumes: No project code from earlier tasks.
 
-- [ ] **Step 1: Write failing memory tests**
+- [x] **Step 1: Write failing memory tests**
 
 Create `internal/memory/sqlite_store_test.go`:
 
@@ -590,19 +596,19 @@ func TestSQLiteStoreSearchesByTagEntityAndFTS(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `go test ./internal/memory`
 
 Expected: FAIL because memory package does not exist.
 
-- [ ] **Step 3: Add SQLite dependency**
+- [x] **Step 3: Add SQLite dependency**
 
 Run: `go get modernc.org/sqlite`
 
 Expected: `go.mod` and `go.sum` include `modernc.org/sqlite`.
 
-- [ ] **Step 4: Implement memory models**
+- [x] **Step 4: Implement memory models**
 
 Create `internal/memory/memory.go`:
 
@@ -652,7 +658,7 @@ type Store interface {
 }
 ```
 
-- [ ] **Step 5: Implement SQLite store**
+- [x] **Step 5: Implement SQLite store**
 
 Create `internal/memory/sqlite_store.go` with schema using `memories` and `memory_fts`, JSON-encoded tags/entities, and a simple score of `entityMatches*100 + tagMatches*50 + importance*5 + turn*0.01`.
 
@@ -667,7 +673,7 @@ func (s *SQLiteStore) Close() error
 
 Use `database/sql`, import `_ "modernc.org/sqlite"`, create the FTS5 table, and query candidates with SQL filters plus in-Go reranking for tag/entity overlap.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `gofmt -w internal/memory/*.go && go test ./internal/memory`
 
@@ -685,15 +691,17 @@ git commit -m "feat: add sqlite fts memory store"
 ### Task 4: LLM Contracts And Fake Client
 
 **Files:**
+
 - Create: `internal/llm/contracts.go`
 - Create: `internal/llm/fake.go`
 - Test: `internal/llm/fake_test.go`
 
 **Interfaces:**
+
 - Produces: `llm.Client`, `llm.RetrievalPlan`, `llm.NarratorResponse`, `llm.MemoryDraft`, deterministic `llm.FakeClient`.
 - Consumes: `game.Effect` from Task 1.
 
-- [ ] **Step 1: Write failing fake LLM test**
+- [x] **Step 1: Write failing fake LLM test**
 
 Create `internal/llm/fake_test.go`:
 
@@ -717,13 +725,13 @@ func TestFakeClientReturnsDeterministicNarration(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `go test ./internal/llm`
 
 Expected: FAIL because llm package does not exist.
 
-- [ ] **Step 3: Implement contracts**
+- [x] **Step 3: Implement contracts**
 
 Create `internal/llm/contracts.go`:
 
@@ -798,7 +806,7 @@ type MemoryDraft struct {
 }
 ```
 
-- [ ] **Step 4: Implement fake client**
+- [x] **Step 4: Implement fake client**
 
 Create `internal/llm/fake.go`:
 
@@ -833,7 +841,7 @@ func firstTags(tags []string, n int) []string {
 }
 ```
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `gofmt -w internal/llm/*.go && go test ./internal/llm`
 
@@ -851,14 +859,16 @@ git commit -m "feat: add llm contracts and fake client"
 ### Task 5: Orchestrator Session With Fake LLM
 
 **Files:**
+
 - Create: `internal/orchestrator/session.go`
 - Test: `internal/orchestrator/session_test.go`
 
 **Interfaces:**
+
 - Consumes: `game.NewStarterSave`, `game.ApplyEffects`, `llm.Client`, `memory.Store`.
 - Produces: `orchestrator.GameSession`, `orchestrator.Session`, `orchestrator.NewSession(save game.SaveGame, llm llm.Client, memories memory.Store, allowedTags []string) *Session`.
 
-- [ ] **Step 1: Write failing orchestrator test**
+- [x] **Step 1: Write failing orchestrator test**
 
 Create `internal/orchestrator/session_test.go`:
 
@@ -899,13 +909,13 @@ func TestHandleTurnReturnsNarrationAndAdvancesTurn(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test and verify it fails**
+- [x] **Step 2: Run test and verify it fails**
 
 Run: `go test ./internal/orchestrator`
 
 Expected: FAIL because orchestrator package does not exist.
 
-- [ ] **Step 3: Implement session orchestration**
+- [x] **Step 3: Implement session orchestration**
 
 Create `internal/orchestrator/session.go`:
 
@@ -997,7 +1007,7 @@ func filterTags(tags []string, allowed []string) []string {
 }
 ```
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run: `gofmt -w internal/orchestrator/*.go && go test ./internal/orchestrator ./internal/...`
 
@@ -1015,15 +1025,17 @@ git commit -m "feat: add orchestrated turn session"
 ### Task 6: CLI Skeleton And README Update
 
 **Files:**
+
 - Create: `cmd/tu-tien-cli/main.go`
 - Modify: `README.md`
 - Test: `cmd/tu-tien-cli/main_test.go`
 
 **Interfaces:**
+
 - Consumes: `orchestrator.NewSession`, `game.NewStarterSave`, `llm.FakeClient`, `memory.NewSQLiteStore`.
 - Produces: Runnable `go run ./cmd/tu-tien-cli --offline` demo with fake LLM.
 
-- [ ] **Step 1: Write failing CLI smoke test**
+- [x] **Step 1: Write failing CLI smoke test**
 
 Create `cmd/tu-tien-cli/main_test.go`:
 
@@ -1044,13 +1056,13 @@ func TestBuildOfflineSession(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test and verify it fails**
+- [x] **Step 2: Run test and verify it fails**
 
 Run: `go test ./cmd/tu-tien-cli`
 
 Expected: FAIL because CLI package does not exist.
 
-- [ ] **Step 3: Implement CLI offline mode**
+- [x] **Step 3: Implement CLI offline mode**
 
 Create `cmd/tu-tien-cli/main.go`:
 
@@ -1138,7 +1150,7 @@ func buildOfflineSession(dataDir string, name string) (*orchestrator.Session, fu
 }
 ```
 
-- [ ] **Step 4: Update README status and run instructions**
+- [x] **Step 4: Update README status and run instructions**
 
 Modify `README.md` status section to say the foundation CLI can run offline after this task. Add a `## Chạy Thử Offline` section with this command:
 
@@ -1148,7 +1160,7 @@ go run ./cmd/tu-tien-cli --offline --name Nam
 
 Then add this sentence below the command: `Offline mode dùng fake LLM client nên không cần API key. Online provider sẽ được nối ở các task sau.`
 
-- [ ] **Step 5: Run tests, smoke test CLI, and commit**
+- [x] **Step 5: Run tests, smoke test CLI, and commit**
 
 Run:
 
@@ -1166,3 +1178,13 @@ Commit:
 git add cmd README.md
 git commit -m "feat: add offline cli skeleton"
 ```
+
+---
+
+## Verification Note (2026-08-04 audit)
+
+All tasks in this plan were re-audited against the current codebase and marked complete:
+
+- `go.mod`, `internal/game`, `internal/config`, `internal/campaign`, `internal/memory`, `internal/llm`, `internal/orchestrator`, and `cmd/tu-tien-cli` all exist with the interfaces this plan specifies (state has grown a `Clone()` method and the LLM/orchestrator layers gained tool-calling and richer narrator state for the later online/TUI plans, but the Task 1-5 contracts described here are all present).
+- The Task 6 offline CLI (`--offline`, `buildOfflineSession`) was superseded by the online plan's `buildSession`/`runTUI`; there is no remaining offline-only code path, which is expected once `docs/superpowers/plans/2026-08-03-online-llm-bubbletea-tui.md` Task 2 replaced it.
+- `gofmt -l` reports no files needing formatting, `go vet ./...` is clean, and `go test ./...` passes (61 tests across 7 packages) as of this audit.

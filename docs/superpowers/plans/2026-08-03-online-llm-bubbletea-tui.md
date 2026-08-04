@@ -37,14 +37,16 @@
 ### Task 1: OpenAI-Compatible LLM Client
 
 **Files:**
+
 - Create: `internal/llm/openai_compatible.go`
 - Create: `internal/llm/openai_compatible_test.go`
 
 **Interfaces:**
+
 - Consumes: `llm.Client`, `PlannerRequest`, `RetrievalPlan`, `NarratorRequest`, `NarratorResponse`, `ExtractorRequest`, `MemoryDraft` from `internal/llm/contracts.go`.
 - Produces: `type OpenAICompatibleConfig`, `func NewOpenAICompatibleClient(cfg OpenAICompatibleConfig) (*OpenAICompatibleClient, error)`, and `OpenAICompatibleClient` implementing `llm.Client`.
 
-- [ ] **Step 1: Write failing config validation tests**
+- [x] **Step 1: Write failing config validation tests**
 
 Create `internal/llm/openai_compatible_test.go` with tests like:
 
@@ -102,13 +104,13 @@ func TestOpenAICompatibleClientSendsBearerToken(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `go test ./internal/llm`
 
 Expected: FAIL because `OpenAICompatibleConfig` and `NewOpenAICompatibleClient` do not exist.
 
-- [ ] **Step 3: Implement minimal client**
+- [x] **Step 3: Implement minimal client**
 
 Create `internal/llm/openai_compatible.go` with:
 
@@ -168,11 +170,11 @@ func NewOpenAICompatibleClient(cfg OpenAICompatibleConfig) (*OpenAICompatibleCli
 
 Then add `PlanRetrieval`, `Narrate`, `ExtractMemories`, and a shared `chatJSON(ctx, systemPrompt, userPrompt string, out any) error` helper that POSTs to `<baseURL>/chat/completions` and unmarshals `choices[0].message.content` into `out`.
 
-- [ ] **Step 4: Add retry and parsing tests**
+- [x] **Step 4: Add retry and parsing tests**
 
 Add tests for `Narrate`, `ExtractMemories`, retry on HTTP 429 once, and invalid JSON returning an error. Use `httptest.NewServer` only.
 
-- [ ] **Step 5: Run package tests**
+- [x] **Step 5: Run package tests**
 
 Run: `gofmt -w internal/llm/*.go && go test ./internal/llm`
 
@@ -183,25 +185,27 @@ Expected: PASS.
 ### Task 2: Online Session Construction And Default Config
 
 **Files:**
+
 - Modify: `cmd/tu-tien-cli/main.go`
 - Modify: `cmd/tu-tien-cli/main_test.go`
 - Create: `configs/llm.yaml`
 
 **Interfaces:**
+
 - Consumes: `config.Load(path string) (config.Config, error)`, `llm.NewOpenAICompatibleClient`, `memory.NewSQLiteStore`, `orchestrator.NewSession`.
 - Produces: `buildSession(ctx context.Context, cfgPath string, name string) (*orchestrator.Session, func(), error)` and no `--offline` runtime path.
 
-- [ ] **Step 1: Write failing CLI construction tests**
+- [x] **Step 1: Write failing CLI construction tests**
 
 Update `cmd/tu-tien-cli/main_test.go` so offline-specific tests are removed or renamed. Add tests that create a temporary config with an unset API key env and assert `buildSession` returns an error mentioning that env var.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `go test ./cmd/tu-tien-cli`
 
 Expected: FAIL because `buildSession` does not exist and `buildOfflineSession` still exists.
 
-- [ ] **Step 3: Implement config-backed session construction**
+- [x] **Step 3: Implement config-backed session construction**
 
 Modify `cmd/tu-tien-cli/main.go`:
 
@@ -210,7 +214,7 @@ Modify `cmd/tu-tien-cli/main.go`:
 - Build a real LLM client from loaded config.
 - Keep save and memory store setup as before, using `cfg.Storage.DataDir` when set and `./data/dev` as a fallback.
 
-- [ ] **Step 4: Add default runtime config**
+- [x] **Step 4: Add default runtime config**
 
 Create `configs/llm.yaml`:
 
@@ -228,7 +232,7 @@ debug:
   log_retrieval: true
 ```
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `gofmt -w cmd/tu-tien-cli/*.go && go test ./cmd/tu-tien-cli`
 
@@ -239,6 +243,7 @@ Expected: PASS without any real network calls.
 ### Task 3: Bubble Tea TUI Adapter
 
 **Files:**
+
 - Create: `cmd/tu-tien-cli/tui.go`
 - Create: `cmd/tu-tien-cli/tui_test.go`
 - Modify: `cmd/tu-tien-cli/main.go`
@@ -246,14 +251,15 @@ Expected: PASS without any real network calls.
 - Modify: `go.sum`
 
 **Interfaces:**
+
 - Consumes: `orchestrator.GameSession`, `orchestrator.PlayerInput`, `game.TurnResult`, helper semantics from existing `resolveSuggestedAction` and `commandForSuggestedAction`.
 - Produces: `newTUIModel(session orchestrator.GameSession, providerLabel string) tuiModel` and `runTUI(ctx context.Context, session orchestrator.GameSession, providerLabel string) error`.
 
-- [ ] **Step 1: Add Bubble Tea dependencies**
+- [x] **Step 1: Add Bubble Tea dependencies**
 
 Run: `go get github.com/charmbracelet/bubbletea@latest github.com/charmbracelet/lipgloss@latest`
 
-- [ ] **Step 2: Write TUI behavior tests**
+- [x] **Step 2: Write TUI behavior tests**
 
 Create `cmd/tu-tien-cli/tui_test.go` with fake session coverage:
 
@@ -262,13 +268,13 @@ Create `cmd/tu-tien-cli/tui_test.go` with fake session coverage:
 - `/status` renders local state and does not call `HandleTurn`;
 - a session error appends an error log entry.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run: `go test ./cmd/tu-tien-cli`
 
 Expected: FAIL because `newTUIModel` and related types do not exist.
 
-- [ ] **Step 4: Implement Bubble Tea model**
+- [x] **Step 4: Implement Bubble Tea model**
 
 Create `cmd/tu-tien-cli/tui.go` with:
 
@@ -278,11 +284,11 @@ Create `cmd/tu-tien-cli/tui.go` with:
 - `View() string` rendering header, log, player panel, suggestions, input bar, and footer with Lip Gloss.
 - `submitInput(text string) tea.Cmd` that calls `session.HandleTurn` in a command and returns a message.
 
-- [ ] **Step 5: Wire main to Bubble Tea**
+- [x] **Step 5: Wire main to Bubble Tea**
 
 Modify `main.go` so successful startup calls `runTUI(context.Background(), session, cfg.LLM.Model)` instead of `runInteractive`.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `gofmt -w cmd/tu-tien-cli/*.go && go test ./cmd/tu-tien-cli`
 
@@ -293,15 +299,17 @@ Expected: PASS.
 ### Task 4: Documentation And Final Verification
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `docs/cli-guide.md`
 - Modify: `configs/example.yaml` if it should stay aligned with `configs/llm.yaml`.
 
 **Interfaces:**
+
 - Consumes: implemented runtime command `go run ./cmd/tu-tien-cli --name Nam` and config path `configs/llm.yaml`.
 - Produces: accurate user-facing docs for online TUI play.
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Replace offline run instructions with:
 
@@ -312,17 +320,17 @@ go run ./cmd/tu-tien-cli --name Nam
 
 Mention `--config configs/llm.yaml` only as an override path, not required for default use.
 
-- [ ] **Step 2: Update CLI guide**
+- [x] **Step 2: Update CLI guide**
 
 Remove `--offline` documentation. Describe the Bubble Tea layout, commands, number selection, loading state, and API key requirement.
 
-- [ ] **Step 3: Run formatting and tests**
+- [x] **Step 3: Run formatting and tests**
 
 Run: `gofmt -w cmd/tu-tien-cli/*.go internal/llm/*.go && go test ./...`
 
 Expected: PASS.
 
-- [ ] **Step 4: Manual startup check without secret leakage**
+- [x] **Step 4: Manual startup check without secret leakage**
 
 Run with `GROQ_API_KEY` unset:
 
@@ -339,3 +347,15 @@ Expected: startup fails with a clear message naming `GROQ_API_KEY` and does not 
 - Spec coverage: online-only runtime is covered by Task 2; OpenAI-compatible client by Task 1; Bubble Tea TUI by Task 3; docs and verification by Task 4.
 - Placeholder scan: no TBD/TODO placeholders remain.
 - Type consistency: exported client/session/TUI names are introduced before use by later tasks.
+
+## Verification Note (2026-08-04 audit)
+
+All tasks re-audited against the current codebase and marked complete:
+
+- `internal/llm/openai_compatible.go` implements `OpenAICompatibleConfig`/`NewOpenAICompatibleClient` with bearer auth, retry on 429/5xx, JSON/YAML decoding with prose/fence extraction, and now also `NarrateWithTools` for engine tool calls (an extension from the later narrator-yaml-output/friendly-tui-flow plans, additive and not conflicting with this plan's contract).
+- `cmd/tu-tien-cli/main.go` has no `--offline` flag; `buildSession` loads `configs/llm.yaml` by default, fails clearly on a missing API key env var, and `--config` overrides the path.
+- `configs/llm.yaml` exists as the default runtime config (left untouched: it currently has a user-local uncommitted edit pointing at a different local provider, which was preserved as instructed).
+- `cmd/tu-tien-cli/tui.go` implements the Bubble Tea model (`newTUIModel`, `runTUI`) with header/history/summary/action rendering, numeric suggestion selection, and command routing; `tui_test.go` covers submission, numeric choice mapping, `/status`, and error-path behavior.
+- README.md and docs/cli-guide.md both document the online-only run flow (`GROQ_API_KEY` + `go run ./cmd/tu-tien-cli --name Nam`) with no offline instructions remaining.
+- Manual check re-run this session: `env -u GROQ_API_KEY -u CODEX_LB_API_KEY go run ./cmd/tu-tien-cli --name Nam` fails at startup naming the missing env var (`CODEX_LB_API_KEY`, since that's what the local uncommitted config currently points at) and prints no secret value.
+- `gofmt -l` reports no files needing formatting, `go vet ./...` is clean, and `go test ./...` passes (61 tests across 7 packages) as of this audit.
