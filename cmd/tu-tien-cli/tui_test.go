@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/namtt/tutine-trpg/internal/game"
 	"github.com/namtt/tutine-trpg/internal/orchestrator"
 )
@@ -38,6 +40,16 @@ func TestTUIFreeTextSubmitsTurn(t *testing.T) {
 	}
 }
 
+func TestTruncateCellsKeepsVietnameseTextOnOneLine(t *testing.T) {
+	got := truncateCells("Hỏi đệ tử gác cổng", 12)
+	if got != "Hỏi đệ tử g…" {
+		t.Fatalf("truncateCells = %q, want %q", got, "Hỏi đệ tử g…")
+	}
+	if strings.Contains(got, "\n") {
+		t.Fatalf("truncateCells must not add a line break: %q", got)
+	}
+}
+
 func TestTUINumberSelectsRoleplaySuggestion(t *testing.T) {
 	session := &recordingSession{
 		save:    game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"}),
@@ -57,6 +69,23 @@ func TestTUINumberSelectsRoleplaySuggestion(t *testing.T) {
 	}
 	if view := model.View().Content; !strings.Contains(view, "Bạn quan sát xung quanh.") {
 		t.Fatalf("view missing selected turn result:\n%s", view)
+	}
+}
+
+func TestTUIResolvedSuggestionsCapToThreeNonEmptyItems(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model, _ = model.applyTurnMsg(turnFinishedMsg{input: "ta quan sát", result: &game.TurnResult{
+		Narration:        "Mây trôi qua cổng môn.",
+		SuggestedActions: []string{"", "Quan sát cổng môn", "Hỏi đệ tử", "Kiểm tra trạng thái", "Rời đi"},
+	}})
+
+	want := []string{"Quan sát cổng môn", "Hỏi đệ tử", "Kiểm tra trạng thái"}
+	if !equalStrings(model.suggestions, want) {
+		t.Fatalf("suggestions = %#v, want %#v", model.suggestions, want)
+	}
+	model = model.handleTab()
+	if got := model.editor.Value(); got != want[0] {
+		t.Fatalf("Tab draft = %q, want first capped suggestion %q", got, want[0])
 	}
 }
 
@@ -444,6 +473,205 @@ func TestTUIWideViewportUsesTranscriptColumnWidth(t *testing.T) {
 	model.refreshTranscript(true)
 	if model.viewport.Width() >= model.width {
 		t.Fatalf("wide viewport width = %d, want a narrower transcript column than %d", model.viewport.Width(), model.width)
+	}
+}
+
+func TestTUIWideVisualShellLabelsFourRegions(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 100, 30
+	view := model.View().Content
+	for _, label := range []string{"NHẬT KÝ HÀNH TRÌNH", "NHÂN VẬT", "BẠN MUỐN LÀM GÌ?"} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("wide visual shell missing %q:\n%s", label, view)
+		}
+	}
+}
+
+func TestTUIVisualShellFitsWideHeightBudget(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 100, 30
+	if rows := strings.Count(model.View().Content, "\n") + 1; rows > model.height {
+		t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, model.height, model.View().Content)
+	}
+}
+
+func TestTUINarrowVisualShellKeepsThreeSeparateSuggestions(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 18
+	view := model.View().Content
+	for _, line := range []string{"NHẬT KÝ HÀNH TRÌNH", "HÀNH ĐỘNG", "1. Quan sát cổng môn", "2. Hỏi đệ tử gác cổng", "3. Kiểm tra trạng thái"} {
+		if !strings.Contains(view, line) {
+			t.Fatalf("narrow visual shell missing %q:\n%s", line, view)
+		}
+	}
+}
+
+func TestTUIVisualShellFitsNarrowHeightBudget(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 18
+	if rows := strings.Count(model.View().Content, "\n") + 1; rows > model.height {
+		t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, model.height, model.View().Content)
+	}
+}
+
+func TestTUICompactShellShowsOnlySelectedSuggestion(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 10
+	view := model.View().Content
+	if !strings.Contains(view, "1. Quan sát cổng môn · Tab 1/3") {
+		t.Fatalf("compact view missing selected-suggestion affordance:\n%s", view)
+	}
+	if strings.Contains(view, "2. Hỏi đệ tử gác cổng") {
+		t.Fatalf("compact view rendered an unselected suggestion:\n%s", view)
+	}
+	if rows := strings.Count(view, "\n") + 1; rows > model.height {
+		t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, model.height, view)
+	}
+}
+
+func TestTUICompactShellWinsOverWideWidthAtShortHeights(t *testing.T) {
+	for _, height := range []int{10, 11, 12, 13} {
+		t.Run(fmt.Sprintf("100x%d", height), func(t *testing.T) {
+			model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+			model.width, model.height = 100, height
+			view := model.View().Content
+			if strings.Contains(view, "NHÂN VẬT") || strings.Contains(view, "2. Hỏi đệ tử gác cổng") {
+				t.Fatalf("short terminal must use compact shell:\n%s", view)
+			}
+			if rows := strings.Count(view, "\n") + 1; rows > height {
+				t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, height, view)
+			}
+		})
+	}
+}
+
+func TestTUIResizeFallbackOmitsInteractiveControls(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 9
+	view := model.View().Content
+	if !strings.Contains(view, "tối thiểu 10 hàng") {
+		t.Fatalf("fallback missing resize instruction:\n%s", view)
+	}
+	for _, forbidden := range []string{"Bạn muốn làm gì?", "Enter gửi", "Bắt đầu:"} {
+		if strings.Contains(view, forbidden) {
+			t.Fatalf("fallback must omit %q:\n%s", forbidden, view)
+		}
+	}
+}
+
+func TestTUIPaletteFitsFullNarrowHeightBudget(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height, model.paletteOpen = 60, 18, true
+	if rows := strings.Count(model.View().Content, "\n") + 1; rows > model.height {
+		t.Fatalf("palette rows = %d, exceed height %d:\n%s", rows, model.height, model.View().Content)
+	}
+}
+
+func TestTUIRecoveryFitsCompactHeightBudget(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 10
+	model.recoverable = true
+	model.notice = turnFailureMessage
+	model.editor.SetValue("ta hỏi đệ tử")
+	if rows := strings.Count(model.View().Content, "\n") + 1; rows > model.height {
+		t.Fatalf("recovery rows = %d, exceed height %d:\n%s", rows, model.height, model.View().Content)
+	}
+}
+
+func TestTUICompactRecoveryHidesSuggestionsAndRetainsEditor(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 10
+	model.recoverable = true
+	model.notice = turnFailureMessage
+	model.editor.SetValue("ta hỏi đệ tử")
+	view := model.View().Content
+	if strings.Contains(view, "1. Quan sát cổng môn") || !strings.Contains(view, "ta hỏi đệ tử") {
+		t.Fatalf("compact recovery should replace suggestions with retained editor:\n%s", view)
+	}
+}
+
+func TestTUIVisualLayoutsShowUnseenTurnWithinHeightBudget(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{60, 18}, {60, 17}, {60, 14}, {60, 10}} {
+		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
+			model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+			model.width, model.height = size.width, size.height
+			model.syncLayout()
+			model.refreshTranscript(true)
+			model.viewport.GotoTop()
+			model.turns = append(model.turns, turnBlock{turnNumber: 1, narration: "lượt mới"})
+			model.refreshTranscript(false)
+			view := model.View().Content
+			wantIndicator := "↓ Có lượt mới · End để xem"
+			if size.height == 10 {
+				wantIndicator = "End mới"
+			}
+			if !strings.Contains(view, wantIndicator) {
+				t.Fatalf("unseen indicator %q missing:\n%s", wantIndicator, view)
+			}
+			if rows := strings.Count(view, "\n") + 1; rows > model.height {
+				t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, model.height, view)
+			}
+		})
+	}
+}
+
+func TestTUIVisualLayoutsKeepNoticeAndLongDraftWithinBudget(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{60, 18}, {60, 17}, {60, 14}} {
+		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
+			model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+			model.width, model.height = size.width, size.height
+			model.notice = "Thông báo rất dài cần luôn ở trong vùng composer cố định."
+			model.editor.SetValue(strings.Repeat("hành động dài ", 20))
+			view := model.View().Content
+			if !strings.Contains(view, "Thông báo rất dài") {
+				t.Fatalf("notice missing:\n%s", view)
+			}
+			if rows := strings.Count(view, "\n") + 1; rows > model.height {
+				t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, model.height, view)
+			}
+		})
+	}
+}
+
+func TestTUIVisualStateMatrixFitsTargetLayouts(t *testing.T) {
+	targets := []struct{ width, height int }{{60, 18}, {60, 17}, {60, 14}, {60, 10}}
+	states := []struct {
+		name      string
+		configure func(*tuiModel)
+		contains  []string
+	}{
+		{"palette", func(m *tuiModel) { m.paletteOpen = true; m.palette.SetFilterText("trạng thái") }, []string{"LỆNH", "trạng thái", "/status", "Enter chọn"}},
+		{"pending", func(m *tuiModel) { m.pending = &pendingTurn{turnNumber: 1, action: "hành động"} }, []string{"ĐANG XỬ LÝ LƯỢT", "PgUp/PgDn"}},
+		{"recovery", func(m *tuiModel) {
+			m.recoverable = true
+			m.notice = strings.Repeat("Thông báo lỗi ", 12)
+			m.editor.SetValue("bản nháp")
+		}, []string{"THỬ LẠI HÀNH ĐỘNG", "bản nháp"}},
+		{"locked", func(m *tuiModel) { m.locked = true; m.notice = ambiguousCompletionMessage }, []string{"/exit"}},
+		{"temporary", func(m *tuiModel) { m.tempView = tempViewHelp }, []string{"Esc quay lại"}},
+	}
+	for _, target := range targets {
+		for _, state := range states {
+			t.Run(fmt.Sprintf("%s-%dx%d", state.name, target.width, target.height), func(t *testing.T) {
+				model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+				model.width, model.height = target.width, target.height
+				state.configure(&model)
+				view := model.View().Content
+				for _, required := range state.contains {
+					if !strings.Contains(view, required) {
+						t.Fatalf("state control %q missing:\n%s", required, view)
+					}
+				}
+				if rows := strings.Count(view, "\n") + 1; rows > target.height {
+					t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, target.height, view)
+				}
+				for _, line := range strings.Split(view, "\n") {
+					if cells := lipgloss.Width(line); cells > target.width {
+						t.Fatalf("line width = %d, exceed width %d: %q", cells, target.width, line)
+					}
+				}
+			})
+		}
 	}
 }
 

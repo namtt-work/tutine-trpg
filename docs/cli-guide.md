@@ -17,16 +17,25 @@ export GROQ_API_KEY=your_key_here
 go run ./cmd/tu-tien-cli --name Nam
 ```
 
-TUI sẽ mở trong terminal với các vùng chính:
+TUI mở ở alternate screen với một bố cục có transcript, status và action composer cố định:
 
 ```txt
-Tutine TRPG | loc_outer_gate | llama-3.1-70b-versatile
-... narration log ...
-... player status ...
-> 
++-- TUTINE TRPG · Ngoại môn Thanh Vân Tông · Lượt 01 ----------------+
+| NHẬT KÝ HÀNH TRÌNH                         | NHÂN VẬT               |
+| Bạn đứng trước cổng môn, mây phủ lưng núi. | Luyện Khí · tầng 1     |
+|                                             | HP 30/30 · Linh lực 20 |
+| BẠN MUỐN LÀM GÌ?                                                     |
+| 1. Quan sát cổng môn                                                |
+| 2. Hỏi đệ tử gác cổng                                               |
+| 3. Kiểm tra trạng thái                                              |
+| > Bạn muốn làm gì?                                                  |
+| Enter gửi · Shift+Enter xuống dòng · Tab gợi ý · / lệnh · Esc thoát|
++---------------------------------------------------------------------+
 ```
 
-Sau dấu `>`, nhập hành động theo văn tự do hoặc nhập lệnh bắt đầu bằng `/`.
+Ở terminal rộng (từ khoảng `100x30`), status nằm ở rail bên phải. Ở narrow layout, status thu thành một dòng; từ 14 hàng trở lên ba gợi ý vẫn là ba dòng riêng. Từ 10–13 hàng chỉ hiển thị gợi ý đang chọn; nhấn `Tab` để đổi gợi ý. Dưới 10 hàng, hãy resize terminal trước khi chơi.
+
+Sau dấu `>`, nhập hành động theo văn tự do hoặc nhập lệnh bắt đầu bằng `/`. `Shift+Enter` thêm dòng mới; draft dài vẫn giữ nguyên trong editor và không đẩy footer khỏi màn hình.
 
 ## Tham Số CLI
 
@@ -107,7 +116,7 @@ Nếu lựa chọn tương ứng với lệnh hệ thống, ví dụ `Kiểm tra
 4. Khi TUI hiện gợi ý, nhập `1`, `2`, `3` để chọn nhanh hoặc nhập hành động tự do.
 5. Dùng `/status`, `/inventory`, `/help`, `/exit` khi cần.
 
-Một số nhãn nội bộ như `qi_refining` hoặc `energy_delta` vẫn đang hiển thị theo ID kỹ thuật trong MVP. Các nhãn này nên được map sang tiếng Việt ở bước polish CLI.
+TUI không hiển thị ID kỹ thuật của scene, realm hoặc save trong nội dung dành cho người chơi.
 
 ## Dữ Liệu Lưu Ở Đâu
 

@@ -112,6 +112,42 @@ var (
 	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 )
 
+func truncateCells(text string, width int) string {
+	text = strings.ReplaceAll(text, "\n", " ")
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(text) <= width {
+		return text
+	}
+	if width == 1 {
+		return "…"
+	}
+
+	var out strings.Builder
+	for _, r := range text {
+		candidate := out.String() + string(r) + "…"
+		if lipgloss.Width(candidate) > width {
+			break
+		}
+		out.WriteRune(r)
+	}
+	return out.String() + "…"
+}
+
+func capSuggestions(suggestions []string) []string {
+	capped := make([]string, 0, 3)
+	for _, suggestion := range suggestions {
+		if suggestion = strings.TrimSpace(suggestion); suggestion != "" {
+			capped = append(capped, suggestion)
+		}
+		if len(capped) == 3 {
+			break
+		}
+	}
+	return capped
+}
+
 func newTUIModel(session orchestrator.GameSession, providerLabel string) tuiModel {
 	save := session.Save()
 	editor := textarea.New()
@@ -439,7 +475,7 @@ func (m tuiModel) applyTurnMsg(msg turnFinishedMsg) (tuiModel, tea.Cmd) {
 		changes:      msg.result.StateChanges,
 		warnings:     msg.result.Warnings,
 	})
-	m.suggestions = append([]string{}, msg.result.SuggestedActions...)
+	m.suggestions = capSuggestions(msg.result.SuggestedActions)
 	m.selected = -1
 	m.editor.Focus()
 	m.refreshTranscript(wasFollowing)
@@ -448,26 +484,241 @@ func (m tuiModel) applyTurnMsg(msg turnFinishedMsg) (tuiModel, tea.Cmd) {
 
 func (m tuiModel) View() tea.View {
 	save := m.session.Save()
+	if m.height < 10 {
+		return tea.View{Content: "Cửa sổ quá thấp, hãy đổi kích thước (tối thiểu 10 hàng).", AltScreen: true}
+	}
 	m.syncLayout()
 	m.refreshTranscript(m.viewport.GetContent() == "")
 	if m.tempView != tempViewNone {
 		m.viewport.SetContent(m.renderTempViewBody(save))
+	} else if m.locked || m.recoverable {
+		m.viewport.SetContent(strings.TrimSpace(m.historyText(save) + "\n\n" + m.notice))
 	}
-	header := renderHeader(save)
-	action := m.renderActionArea()
-	if m.height < 8 {
-		return tea.View{Content: strings.Join([]string{"Cửa sổ quá thấp, hãy đổi kích thước (tối thiểu 8 hàng).", m.editor.View(), m.help.ShortHelpView([]key.Binding{m.keys.back})}, "\n"), AltScreen: true}
+	if m.height >= 14 && m.width > wideBreakpoint && m.tempView == tempViewNone {
+		return tea.View{Content: m.renderWideShell(save), AltScreen: true}
 	}
-	body := m.viewport.View()
-	if m.width > wideBreakpoint && m.tempView == tempViewNone {
-		summary := renderSummary(save)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(max(m.width-lipgloss.Width(summary)-2, 20)).Render(body), summary)
-		return tea.View{Content: strings.Join([]string{header, body, action}, "\n"), AltScreen: true}
+	if m.height >= 18 {
+		return tea.View{Content: m.renderNarrowFullShell(save), AltScreen: true}
 	}
-	if m.height < 14 {
-		return tea.View{Content: strings.Join([]string{header, renderCompactSummary(save), body, action}, "\n"), AltScreen: true}
+	if m.height >= 14 {
+		return tea.View{Content: m.renderCondensedShell(save), AltScreen: true}
 	}
-	return tea.View{Content: strings.Join([]string{header, renderSummary(save), body, action}, "\n"), AltScreen: true}
+	return tea.View{Content: m.renderCompactShell(save), AltScreen: true}
+}
+
+func (m tuiModel) renderWideShell(save game.SaveGame) string {
+	width := max(m.width, 40)
+	railWidth := min(30, max(26, width/3))
+	transcriptWidth := max(width-railWidth-1, 20)
+	action := m.renderNarrowNormalAction(width-4, true)
+	actionLines := strings.Split(action, "\n")
+	unseenRows := 0
+	if m.unseen {
+		unseenRows = 1
+	}
+	bodyHeight := max(m.height-len(actionLines)-4-unseenRows, 3)
+	viewport := m.viewport
+	viewport.SetWidth(transcriptWidth)
+	viewport.SetHeight(max(bodyHeight-1, 1))
+	transcript := lipgloss.NewStyle().Width(transcriptWidth).Height(bodyHeight).Render(strings.Join([]string{
+		headerStyle.Render("NHẬT KÝ HÀNH TRÌNH"), viewport.View(),
+	}, "\n"))
+	character := lipgloss.NewStyle().Width(railWidth).Height(bodyHeight).Render(strings.Join([]string{
+		headerStyle.Render("NHÂN VẬT"),
+		fmt.Sprintf("%s · tầng %d", realmName(save.Player.Realm), save.Player.Stage),
+		fmt.Sprintf("HP %d/%d", save.Player.HP, save.Player.MaxHP),
+		fmt.Sprintf("Linh lực %d/%d", save.Player.SpiritualEnergy, save.Player.MaxEnergy),
+		fmt.Sprintf("Túi đồ %d món", inventoryCount(save)),
+	}, "\n"))
+
+	lines := []string{shellBorder(width), shellLine("TUTINE TRPG · Cảnh: "+sceneName(save.CurrentScene)+fmt.Sprintf(" · Lượt %02d", save.CurrentTurn+1), width)}
+	lines = append(lines, strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, transcript, " ", character), "\n")...)
+	if m.unseen {
+		lines = append(lines, shellLine("↓ Có lượt mới · End để xem", width))
+	}
+	lines = append(lines, shellLine("BẠN MUỐN LÀM GÌ?", width))
+	for _, line := range actionLines {
+		lines = append(lines, shellLine(line, width))
+	}
+	lines = append(lines, shellBorder(width))
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) renderNarrowFullShell(save game.SaveGame) string {
+	width := max(m.width, 20)
+	innerWidth := width - 4
+	viewport := m.viewport
+	viewport.SetWidth(innerWidth)
+	viewportHeight := 3
+	if m.tempView != tempViewNone {
+		viewportHeight = max(m.height-8, 1)
+	}
+	viewport.SetHeight(viewportHeight)
+
+	lines := []string{
+		shellBorder(width),
+		shellLine("TUTINE TRPG · "+sceneName(save.CurrentScene)+fmt.Sprintf(" · Lượt %02d", save.CurrentTurn+1), width),
+		shellLine("NHÂN VẬT · "+renderCompactSummary(save), width),
+		shellLine("NHẬT KÝ HÀNH TRÌNH", width),
+	}
+	for _, line := range strings.Split(viewport.View(), "\n") {
+		lines = append(lines, shellLine(line, width))
+	}
+	if m.unseen {
+		lines = append(lines, shellLine("↓ Có lượt mới · End để xem", width))
+	}
+	lines = append(lines, shellLine("HÀNH ĐỘNG", width))
+	for _, line := range strings.Split(m.renderNarrowNormalAction(innerWidth, false), "\n") {
+		lines = append(lines, shellLine(line, width))
+	}
+	lines = append(lines, shellBorder(width))
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) renderCondensedShell(save game.SaveGame) string {
+	width := max(m.width, 20)
+	action := m.renderNarrowNormalAction(width, false)
+	actionLines := strings.Split(action, "\n")
+	viewport := m.viewport
+	viewport.SetWidth(width)
+	viewport.SetHeight(max(m.height-len(actionLines)-3-boolToInt(m.unseen), 1))
+
+	lines := []string{
+		truncateCells("TUTINE TRPG · "+sceneName(save.CurrentScene)+fmt.Sprintf(" · Lượt %02d", save.CurrentTurn+1), width),
+		truncateCells(renderCompactSummary(save), width),
+		"NHẬT KÝ HÀNH TRÌNH",
+	}
+	lines = append(lines, strings.Split(viewport.View(), "\n")...)
+	if m.unseen {
+		lines = append(lines, "↓ Có lượt mới · End để xem")
+	}
+	lines = append(lines, actionLines...)
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) renderNarrowNormalAction(width int, includeIntro bool) string {
+	if m.paletteOpen || m.locked || m.pending != nil || m.tempView != tempViewNone || m.recoverable {
+		return m.renderBoundedStateAction(width)
+	}
+	lines := make([]string, 0, len(m.suggestions)+2)
+	if includeIntro && len(m.turns) == 0 {
+		lines = append(lines, "Bắt đầu:")
+	}
+	for i, suggestion := range m.suggestions {
+		lines = append(lines, truncateCells(fmt.Sprintf("%d. %s", i+1, suggestion), width))
+	}
+	if includeIntro && len(m.turns) == 0 {
+		lines = append(lines, "Bạn muốn làm gì? Ví dụ: ta quan sát cổng môn")
+	}
+	if m.notice != "" {
+		lines = append(lines, truncateCells(m.notice, width))
+	}
+	editor := m.editor
+	editor.SetWidth(width)
+	editor.SetHeight(3)
+	lines = append(lines, editor.View(), m.compactFooter())
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) renderBoundedStateAction(width int) string {
+	switch {
+	case m.paletteOpen:
+		palette := m.palette
+		palette.Title = "LỆNH"
+		palette.SetWidth(width)
+		palette.SetHeight(3)
+		return strings.Join([]string{palette.View(), "Enter chọn · ↑/↓ · Esc"}, "\n")
+	case m.locked:
+		return strings.Join([]string{truncateCells("Nhập liệu đã khóa; mở / để thoát.", width), "/exit · Esc thoát"}, "\n")
+	case m.pending != nil:
+		return strings.Join([]string{"ĐANG XỬ LÝ LƯỢT", truncateCells(m.spinner.View()+" Đang xử lý lượt chơi...", width), "PgUp/PgDn lịch sử"}, "\n")
+	case m.tempView != tempViewNone:
+		return "Esc quay lại"
+	case m.recoverable:
+		editor := m.editor
+		editor.SetWidth(width)
+		editor.SetHeight(min(editor.Height(), 3))
+		return strings.Join([]string{"THỬ LẠI HÀNH ĐỘNG", truncateCells(m.notice, width), editor.View(), "Enter thử lại · Esc huỷ"}, "\n")
+	default:
+		return ""
+	}
+}
+
+func (m tuiModel) compactFooter() string {
+	footer := "Enter gửi · Tab · / · Esc"
+	if m.unseen {
+		footer += " · End mới"
+	}
+	return footer
+}
+
+func shellBorder(width int) string {
+	return "+" + strings.Repeat("-", max(width-2, 1)) + "+"
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func shellLine(text string, width int) string {
+	text = truncateCells(text, max(width-4, 1))
+	return "| " + text + strings.Repeat(" ", max(width-lipgloss.Width(text)-4, 0)) + " |"
+}
+
+func (m tuiModel) renderCompactShell(save game.SaveGame) string {
+	width := max(m.width, 20)
+	contentWidth := width - 2
+	viewport := m.viewport
+	viewport.SetWidth(contentWidth)
+	viewport.SetHeight(1)
+
+	lines := []string{
+		truncateCells("TUTINE TRPG · "+sceneName(save.CurrentScene)+fmt.Sprintf(" · Lượt %02d", save.CurrentTurn+1), contentWidth),
+		truncateCells(renderCompactSummary(save), contentWidth),
+		viewport.View(),
+	}
+	if m.paletteOpen {
+		lines = append(lines, strings.Split(m.renderBoundedStateAction(contentWidth), "\n")...)
+		return strings.Join(lines, "\n")
+	}
+	if m.locked {
+		lines = append(lines, truncateCells("Nhập liệu đã khóa; mở / để thoát.", contentWidth), "/exit · Esc thoát")
+		return strings.Join(lines, "\n")
+	}
+	if m.pending != nil {
+		lines = append(lines, "ĐANG XỬ LÝ LƯỢT", truncateCells(m.spinner.View()+" Đang xử lý lượt chơi...", contentWidth), "PgUp/PgDn lịch sử")
+		return strings.Join(lines, "\n")
+	}
+	if m.tempView != tempViewNone {
+		return strings.Join(append(lines, "Esc quay lại"), "\n")
+	}
+	if m.recoverable {
+		editor := m.editor
+		editor.SetWidth(contentWidth)
+		editor.SetHeight(1)
+		lines = append(lines, "THỬ LẠI HÀNH ĐỘNG", truncateCells(m.notice, contentWidth), editor.View(), "Enter thử lại · Esc huỷ")
+		return strings.Join(lines, "\n")
+	}
+	if len(m.suggestions) > 0 {
+		selected := m.selected
+		if selected < 0 || selected >= len(m.suggestions) {
+			selected = 0
+		}
+		lines = append(lines, truncateCells(fmt.Sprintf("%d. %s · Tab %d/%d", selected+1, m.suggestions[selected], selected+1, len(m.suggestions)), contentWidth))
+	} else {
+		lines = append(lines, "Nhập hành động tự do · Tab gợi ý")
+	}
+	if m.notice != "" {
+		lines = append(lines, truncateCells(m.notice, contentWidth))
+	}
+	editor := m.editor
+	editor.SetWidth(contentWidth)
+	editor.SetHeight(1)
+	lines = append(lines, editor.View(), m.compactFooter())
+	return strings.Join(lines, "\n")
 }
 
 func renderCompactSummary(save game.SaveGame) string {
@@ -595,19 +846,22 @@ func (m tuiModel) renderActionArea() string {
 	if m.notice != "" {
 		parts = append(parts, m.renderNotice())
 	}
-	if m.unseen {
-		parts = append(parts, hintStyle.Render("↓ Có lượt mới (End để xem)"))
-	}
 	parts = append(parts, m.editor.View())
 	parts = append(parts, hintStyle.Render(m.footer()))
 	return strings.Join(parts, "\n")
 }
 
 func (m tuiModel) footer() string {
+	var footer string
 	if m.recoverable {
-		return "Enter thử lại · sửa nội dung trước khi gửi · Esc huỷ"
+		footer = "Enter thử lại · sửa nội dung trước khi gửi · Esc huỷ"
+	} else {
+		footer = m.help.ShortHelpView([]key.Binding{m.keys.submit, m.keys.newline, m.keys.suggest, m.keys.palette, m.keys.pageUp, m.keys.back})
 	}
-	return m.help.ShortHelpView([]key.Binding{m.keys.submit, m.keys.newline, m.keys.suggest, m.keys.palette, m.keys.pageUp, m.keys.back})
+	if m.unseen {
+		footer += " · End mới"
+	}
+	return footer
 }
 
 func (m tuiModel) renderNotice() string {
