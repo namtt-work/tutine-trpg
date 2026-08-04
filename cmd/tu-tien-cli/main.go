@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/namtt/tutine-trpg/internal/config"
 	"github.com/namtt/tutine-trpg/internal/game"
@@ -36,6 +38,9 @@ func main() {
 }
 
 func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	name := flag.String("name", "Vô Danh", "player name for a new game")
 	configPath := flag.String("config", "configs/llm.yaml", "runtime config path")
 	saveID := flag.String("save", "", "resume a specific save, skipping auto-resume")
@@ -43,7 +48,7 @@ func run() error {
 	flag.Parse()
 
 	opts := StartupOptions{PlayerName: *name, SaveID: *saveID, ForceNew: *forceNew}
-	session, logger, cleanup, err := buildSession(context.Background(), *configPath, opts)
+	session, logger, cleanup, err := buildSession(ctx, *configPath, opts)
 	if err != nil {
 		return err
 	}
@@ -53,7 +58,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return runTUI(context.Background(), session, cfg.LLM.Model, logger)
+	return runTUI(ctx, session, cfg.LLM.Model, logger)
 }
 
 func renderStatus(output interface{ Write([]byte) (int, error) }, save game.SaveGame) {

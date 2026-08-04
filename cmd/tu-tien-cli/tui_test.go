@@ -852,6 +852,65 @@ func TestTUIAmbiguousCompletionAllowsExitCommand(t *testing.T) {
 	assertQuitCommand(t, cmd)
 }
 
+func TestTUICtrlCWhilePendingCancelsTurnAndQuitsAfterCompletion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.ctx = ctx
+	model.cancel = cancel
+	model.pending = &pendingTurn{turnNumber: 1, action: "ta quan sát"}
+
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
+	model = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("cmd is not nil, quit must wait for the pending turn to finish")
+	}
+	if !model.quitting {
+		t.Fatal("quitting should be set so applyTurnMsg quits once the turn completes")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("pending turn context was not canceled")
+	}
+
+	model, cmd = model.applyTurnMsg(turnFinishedMsg{input: "ta quan sát", err: ctx.Err()})
+	assertQuitCommand(t, cmd)
+}
+
+func TestTUIEscWhilePendingCancelsTurnAndQuitsAfterCompletion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.ctx = ctx
+	model.cancel = cancel
+	model.pending = &pendingTurn{turnNumber: 1, action: "ta quan sát"}
+
+	updated, cmd := model.Update(keyPress(tea.KeyEsc, ""))
+	model = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("cmd is not nil, quit must wait for the pending turn to finish")
+	}
+	if !model.quitting {
+		t.Fatal("quitting should be set so applyTurnMsg quits once the turn completes")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("pending turn context was not canceled")
+	}
+}
+
+func TestTUIExitCommandWhilePendingCancelsTurnAndWaits(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.ctx = ctx
+	model.cancel = cancel
+	model.pending = &pendingTurn{turnNumber: 1, action: "ta quan sát"}
+
+	model, cmd := model.handleCommand("/exit")
+	if cmd != nil {
+		t.Fatal("cmd is not nil, /exit while pending must wait for the turn to finish")
+	}
+	if !model.quitting || ctx.Err() == nil {
+		t.Fatalf("quitting = %v, ctx.Err() = %v, want quitting=true and canceled ctx", model.quitting, ctx.Err())
+	}
+}
+
 func keyPress(code rune, text string) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Text: text})
 }

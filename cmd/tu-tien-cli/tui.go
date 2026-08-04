@@ -71,6 +71,8 @@ type tuiKeyMap struct {
 
 type tuiModel struct {
 	ctx           context.Context
+	cancel        context.CancelFunc
+	quitting      bool
 	session       orchestrator.GameSession
 	providerLabel string
 	logger        *log.Logger
@@ -179,6 +181,7 @@ func newTUIModel(session orchestrator.GameSession, providerLabel string) tuiMode
 	}
 	return tuiModel{
 		ctx:           context.Background(),
+		cancel:        func() {},
 		session:       session,
 		providerLabel: providerLabel,
 		suggestions:   initialSuggestionsFor(save.CurrentScene),
@@ -195,8 +198,11 @@ func newTUIModel(session orchestrator.GameSession, providerLabel string) tuiMode
 }
 
 func runTUI(ctx context.Context, session orchestrator.GameSession, providerLabel string, logger *log.Logger) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	model := newTUIModel(session, providerLabel)
 	model.ctx = ctx
+	model.cancel = cancel
 	model.logger = logger
 	_, err := tea.NewProgram(model).Run()
 	return err
@@ -232,6 +238,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m tuiModel) handleKey(msg tea.KeyPressMsg) (tuiModel, tea.Cmd) {
 	keyPress := msg.Key()
 	if keyPress.Code == 'c' && keyPress.Mod&tea.ModCtrl != 0 {
+		if m.pending != nil {
+			m.cancel()
+			m.quitting = true
+			return m, nil
+		}
 		return m, tea.Quit
 	}
 	if keyPress.Code == tea.KeyEsc {
@@ -358,6 +369,11 @@ func (m tuiModel) handleEsc() (tuiModel, tea.Cmd) {
 		m.notice = ""
 		return m, nil
 	default:
+		if m.pending != nil {
+			m.cancel()
+			m.quitting = true
+			return m, nil
+		}
 		return m, tea.Quit
 	}
 }
@@ -431,6 +447,11 @@ func (m tuiModel) handleCommand(command string) (tuiModel, tea.Cmd) {
 	case "/help":
 		m.tempView = tempViewHelp
 	case "/exit":
+		if m.pending != nil {
+			m.cancel()
+			m.quitting = true
+			return m, nil
+		}
 		return m, tea.Quit
 	default:
 		m.notice = fmt.Sprintf("Không hiểu lệnh %s. Nhập /help để xem các lệnh hiện có.", command)
@@ -441,6 +462,9 @@ func (m tuiModel) handleCommand(command string) (tuiModel, tea.Cmd) {
 func (m tuiModel) applyTurnMsg(msg turnFinishedMsg) (tuiModel, tea.Cmd) {
 	wasFollowing := m.viewport.AtBottom()
 	m.pending = nil
+	if m.quitting {
+		return m, tea.Quit
+	}
 	if msg.err != nil {
 		if m.logger != nil {
 			m.logger.Printf("turn failed (input=%q): %v", msg.input, msg.err)
