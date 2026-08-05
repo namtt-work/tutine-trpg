@@ -284,3 +284,34 @@ func TestListSavesSkipsEntryWithMismatchedEmbeddedSaveID(t *testing.T) {
 		t.Fatalf("summaries = %#v, want only %q", summaries, valid.SaveID)
 	}
 }
+
+func TestSaveSnapshotAndEventsUsePrivatePermissions(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileStore(dir)
+	save := game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})
+	lock, err := store.AcquireLock(context.Background(), save.SaveID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	if err := store.SaveSnapshot(context.Background(), save); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendEvent(context.Background(), save.SaveID, Event{Turn: 1, Type: EventTypeTurnResolved}); err != nil {
+		t.Fatal(err)
+	}
+	for path, what := range map[string]string{
+		filepath.Join(dir, "saves", save.SaveID):                 "save directory",
+		filepath.Join(dir, "saves", save.SaveID, "state.json"):   "state.json",
+		filepath.Join(dir, "saves", save.SaveID, "events.jsonl"): "events.jsonl",
+		filepath.Join(dir, "saves", save.SaveID, ".lock"):        ".lock",
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", what, err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Fatalf("%s permissions = %#o, want no group/other access", what, perm)
+		}
+	}
+}

@@ -40,7 +40,7 @@ func (fs *FileStore) SaveSnapshot(ctx context.Context, save game.SaveGame) error
 		return err
 	}
 	dir := fs.saveDir(save.SaveID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create save directory: %w", err)
 	}
 	data, err := json.MarshalIndent(save, "", "  ")
@@ -106,14 +106,14 @@ func (fs *FileStore) AppendEvent(ctx context.Context, saveID string, event Event
 		return err
 	}
 	dir := fs.saveDir(saveID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create save directory: %w", err)
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open event log: %w", err)
 	}
@@ -141,11 +141,11 @@ func (fs *FileStore) AcquireLock(ctx context.Context, saveID string) (Lock, erro
 		return nil, err
 	}
 	dir := fs.saveDir(saveID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create save directory: %w", err)
 	}
 	lockPath := filepath.Join(dir, ".lock")
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			return nil, fmt.Errorf("save %q is already open in another process (remove %s if that process is no longer running)", saveID, lockPath)

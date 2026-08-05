@@ -104,10 +104,10 @@ func buildSession(ctx context.Context, configPath string, opts StartupOptions) (
 	if strings.TrimSpace(dataDir) == "" {
 		dataDir = "./data/dev"
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, nil, nil, err
 	}
-	logFile, err := os.OpenFile(filepath.Join(dataDir, "debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	logFile, err := os.OpenFile(filepath.Join(dataDir, "debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, nil, nil, err
 	}

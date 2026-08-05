@@ -298,3 +298,49 @@ func equalStrings(left []string, right []string) bool {
 	}
 	return true
 }
+
+func TestBuildSessionUsesPrivateDataPermissions(t *testing.T) {
+	t.Setenv("TEST_GROQ_API_KEY", "secret-test-key")
+	dataDir := t.TempDir() // writeTestConfig writes dataDir/llm.yaml directly; no pre-created subdir
+	cfgPath := writeTestConfig(t, dataDir, "TEST_GROQ_API_KEY")
+	_, _, cleanup, err := buildSession(context.Background(), cfgPath, StartupOptions{PlayerName: "Nam"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	for path, what := range map[string]string{
+		filepath.Join(dataDir, "debug.log"): "debug.log",
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", what, err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Fatalf("%s permissions = %#o, want no group/other access", what, perm)
+		}
+	}
+	// t.TempDir() pre-creates dataDir itself (0775 under Go 1.26's umask
+	// handling), so assert on the artifacts buildSession creates: the fresh
+	// save directory (MkdirAll 0o700) and its state.json (0600).
+	savesDir := filepath.Join(dataDir, "saves")
+	entries, err := os.ReadDir(savesDir)
+	if err != nil {
+		t.Fatalf("read saves dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("saves dirs = %d, want exactly one created by buildSession", len(entries))
+	}
+	saveDir := filepath.Join(savesDir, entries[0].Name())
+	for path, what := range map[string]string{
+		saveDir:                              "save directory",
+		filepath.Join(saveDir, "state.json"): "state.json",
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", what, err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Fatalf("%s permissions = %#o, want no group/other access", what, perm)
+		}
+	}
+}
