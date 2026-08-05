@@ -633,6 +633,22 @@ func TestTUIVisualLayoutsKeepNoticeAndLongDraftWithinBudget(t *testing.T) {
 	}
 }
 
+func TestTUICompactPendingRendersOneStatusLinePlusPagingFooter(t *testing.T) {
+	model := newTUIModel(&recordingSession{save: game.NewStarterSave(game.NewGameRequest{Name: "Nam", CampaignID: "thanh-van-sect"})}, "test-model")
+	model.width, model.height = 60, 10
+	model.pending = &pendingTurn{turnNumber: 1, action: "ta quan sát"}
+	view := model.View().Content
+	if strings.Contains(view, "ĐANG XỬ LÝ LƯỢT") {
+		t.Fatalf("compact pending must not render a separate status heading:\n%s", view)
+	}
+	if !strings.Contains(view, "Đang xử lý lượt") || !strings.Contains(view, "PgUp/PgDn lịch sử") {
+		t.Fatalf("compact pending must show one status line plus a paging footer:\n%s", view)
+	}
+	if rows := strings.Count(view, "\n") + 1; rows > model.height {
+		t.Fatalf("rendered rows = %d, exceed height %d:\n%s", rows, model.height, view)
+	}
+}
+
 func TestTUIVisualStateMatrixFitsTargetLayouts(t *testing.T) {
 	targets := []struct{ width, height int }{{60, 18}, {60, 17}, {60, 14}, {60, 10}}
 	states := []struct {
@@ -641,7 +657,7 @@ func TestTUIVisualStateMatrixFitsTargetLayouts(t *testing.T) {
 		contains  []string
 	}{
 		{"palette", func(m *tuiModel) { m.paletteOpen = true; m.palette.SetFilterText("trạng thái") }, []string{"LỆNH", "trạng thái", "/status", "Enter chọn"}},
-		{"pending", func(m *tuiModel) { m.pending = &pendingTurn{turnNumber: 1, action: "hành động"} }, []string{"ĐANG XỬ LÝ LƯỢT", "PgUp/PgDn"}},
+		{"pending", func(m *tuiModel) { m.pending = &pendingTurn{turnNumber: 1, action: "hành động"} }, []string{"Đang xử lý lượt", "PgUp/PgDn"}},
 		{"recovery", func(m *tuiModel) {
 			m.recoverable = true
 			m.notice = strings.Repeat("Thông báo lỗi ", 12)

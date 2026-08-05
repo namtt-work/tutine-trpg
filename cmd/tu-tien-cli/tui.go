@@ -712,7 +712,7 @@ func (m tuiModel) renderCompactShell(save game.SaveGame) string {
 		return strings.Join(lines, "\n")
 	}
 	if m.pending != nil {
-		lines = append(lines, "ĐANG XỬ LÝ LƯỢT", truncateCells(m.spinner.View()+" Đang xử lý lượt chơi...", contentWidth), "PgUp/PgDn lịch sử")
+		lines = append(lines, truncateCells(m.spinner.View()+" Đang xử lý lượt...", contentWidth), "PgUp/PgDn lịch sử")
 		return strings.Join(lines, "\n")
 	}
 	if m.tempView != tempViewNone {
